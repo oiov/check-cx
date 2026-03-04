@@ -21,7 +21,14 @@ export async function GET() {
   const { data, error } = await admin
     .from("site_settings")
     .select("key,value,description,editable")
-    .in("key", ["site.title", "site.description", "site.logo_url", "site.favicon_url"]);
+    .in("key", [
+      "site.title",
+      "site.description",
+      "site.logo_url",
+      "site.favicon_url",
+      "site.github_url",
+      "check_poll_interval_seconds",
+    ]);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -41,7 +48,8 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { key, value } = body;
 
-  if (!key || !value) {
+  // value 允许为空字符串（如 github_url 置空代表不显示）
+  if (!key || value === undefined || value === null) {
     return NextResponse.json({ error: "key 和 value 必填" }, { status: 400 });
   }
 
@@ -61,8 +69,7 @@ export async function PUT(request: NextRequest) {
   const admin = createAdminClient();
   const { error } = await admin
     .from("site_settings")
-    .update({ value })
-    .eq("key", key);
+    .upsert({ key, value }, { onConflict: "key" });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -8,6 +8,7 @@ export interface SiteConfig {
   description: string;
   logoUrl: string;
   faviconUrl: string;
+  githubUrl: string;
 }
 
 let cachedConfig: SiteConfig | null = null;
@@ -49,6 +50,7 @@ export async function getSiteConfig(forceRefresh = false): Promise<SiteConfig> {
     description: "实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟",
     logoUrl: "/favicon.png",
     faviconUrl: "/favicon.png",
+    githubUrl: "",
   };
 }
 

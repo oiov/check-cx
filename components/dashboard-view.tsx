@@ -44,6 +44,7 @@ import type {
   DashboardData,
   GroupedProviderTimelines,
   GroupInfoSummary,
+  ProviderTimeline,
 } from "@/lib/types";
 import type { SiteConfig } from "@/lib/utils/site-config-cache";
 import { UNGROUPED_DISPLAY_NAME } from "@/lib/types";
