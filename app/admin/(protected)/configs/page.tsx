@@ -184,8 +184,25 @@ export default function ConfigsPage() {
     const ids = [...selected];
     if (ids.length === 0) return;
     setBatchRunning(true);
-    await Promise.all(ids.map((id) => runTest(id)));
-    setBatchRunning(false);
+    setTestLoading((prev) => ({ ...prev, ...Object.fromEntries(ids.map((id) => [id, true])) }));
+    try {
+      const res = await fetch("/api/admin/configs/batch-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const resultMap: Record<string, { status: string; latencyMs: number | null; message: string | null }> =
+        res.ok ? await res.json() : {};
+      setTestResults((prev) => ({ ...prev, ...resultMap }));
+    } catch {
+      setTestResults((prev) => ({
+        ...prev,
+        ...Object.fromEntries(ids.map((id) => [id, { status: "error", latencyMs: null, message: "请求失败" }])),
+      }));
+    } finally {
+      setTestLoading((prev) => { const next = { ...prev }; ids.forEach((id) => delete next[id]); return next; });
+      setBatchRunning(false);
+    }
   }
 
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
