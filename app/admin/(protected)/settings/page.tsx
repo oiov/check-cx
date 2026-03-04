@@ -42,6 +42,8 @@ export default function SettingsPage() {
         "site.description",
         "site.logo_url",
         "site.favicon_url",
+        "site.github_url",
+        "check_poll_interval_seconds",
       ];
 
       // 逐个更新配置项
@@ -85,12 +87,12 @@ export default function SettingsPage() {
           <h1 className="text-2xl font-bold">系统设置</h1>
         </div>
         <p className="text-muted-foreground">
-          配置前台页面的标题、描述和图标
+          配置前台页面和系统参数
         </p>
       </div>
 
-      {/* 配置卡片 */}
-      <div className="rounded-lg border border-border bg-card p-6">
+      {/* 前台页面配置 */}
+      <div className="rounded-lg border border-border bg-card p-6 mb-6">
         <h2 className="mb-6 text-lg font-semibold">前台页面配置</h2>
 
         <SiteConfigForm
@@ -98,29 +100,81 @@ export default function SettingsPage() {
           onChange={(key, value) => setFormData((prev) => ({ ...prev, [key]: value }))}
         />
 
-        {/* 消息和按钮 */}
-        <div className="mt-8 flex items-center justify-between">
-          {message && (
-            <div
-              className={`text-sm ${saved ? "text-emerald-600" : "text-destructive"}`}
-            >
-              {message}
-            </div>
-          )}
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="ml-auto inline-flex h-9 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? "保存中..." : "保存配置"}
-          </button>
+        {/* GitHub 链接 */}
+        <div className="mt-6 space-y-2">
+          <label className="text-sm font-medium">GitHub 链接（为空则不显示）</label>
+          <input
+            type="url"
+            placeholder="https://github.com/example/repo"
+            value={formData["site.github_url"] || ""}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, "site.github_url": e.target.value }))
+            }
+            className="w-full px-3 py-2 border border-border rounded-md bg-background text-sm"
+          />
         </div>
       </div>
 
+      {/* 系统配置 */}
+      <div className="rounded-lg border border-border bg-card p-6 mb-6">
+        <h2 className="mb-6 text-lg font-semibold">系统配置</h2>
+
+        <div className="space-y-4">
+          {/* 轮询间隔 */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">轮询检测间隔（秒）</label>
+            <div className="flex gap-2">
+              <select
+                value={formData["check_poll_interval_seconds"] || "60"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    "check_poll_interval_seconds": e.target.value,
+                  }))
+                }
+                className="flex-1 px-3 py-2 border border-border rounded-md bg-background text-sm"
+              >
+                <option value="15">15 秒</option>
+                <option value="30">30 秒</option>
+                <option value="60">1 分钟</option>
+                <option value="300">5 分钟</option>
+                <option value="600">10 分钟</option>
+                <option value="1800">30 分钟</option>
+                <option value="3600">1 小时</option>
+              </select>
+              <span className="text-xs text-muted-foreground self-center whitespace-nowrap">
+                范围：15-3600 秒
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              检测轮询的时间间隔，修改后下一轮检测会立即应用新的间隔设置
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 消息和按钮 */}
+      <div className="flex items-center justify-between mb-6">
+        {message && (
+          <div
+            className={`text-sm ${saved ? "text-emerald-600" : "text-destructive"}`}
+          >
+            {message}
+          </div>
+        )}
+        <button
+          onClick={handleSubmit}
+          disabled={loading}
+          className="ml-auto inline-flex h-9 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? "保存中..." : "保存配置"}
+        </button>
+      </div>
+
       {/* 提示信息 */}
-      <div className="mt-6 rounded-lg border border-border/50 bg-muted/30 p-4">
+      <div className="rounded-lg border border-border/50 bg-muted/30 p-4">
         <p className="text-sm text-muted-foreground">
-          <strong>提示：</strong>修改后会立即生效，前台页面会自动更新为新配置的标题和描述。
+          <strong>提示：</strong>修改后会立即生效。轮询间隔的新设置会在下一轮检测时应用。
         </p>
       </div>
     </div>

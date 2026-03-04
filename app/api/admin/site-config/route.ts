@@ -45,8 +45,15 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "key 和 value 必填" }, { status: 400 });
   }
 
-  // 仅允许编辑前台配置
-  const allowedKeys = ["site.title", "site.description", "site.logo_url", "site.favicon_url"];
+  // 仅允许编辑前台配置和系统配置
+  const allowedKeys = [
+    "site.title",
+    "site.description",
+    "site.logo_url",
+    "site.favicon_url",
+    "site.github_url",
+    "check_poll_interval_seconds",
+  ];
   if (!allowedKeys.includes(key)) {
     return NextResponse.json({ error: "不允许编辑此配置项" }, { status: 403 });
   }
