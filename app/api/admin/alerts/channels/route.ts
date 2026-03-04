@@ -18,8 +18,14 @@ export async function POST(request: NextRequest) {
   if (err) return err;
   const body = await request.json();
   const { name, type, config, enabled } = body;
-  if (!name || !type || !config?.url) {
-    return NextResponse.json({ error: "name、type、config.url 必填" }, { status: 400 });
+  const validTypes = ["webhook", "feishu", "dingtalk", "pushplus"];
+  if (!name || !type || !validTypes.includes(type)) {
+    return NextResponse.json({ error: "name、type 必填，type 须为合法渠道类型" }, { status: 400 });
+  }
+  if (type === "pushplus") {
+    if (!config?.token) return NextResponse.json({ error: "PushPlus 渠道需填写 token" }, { status: 400 });
+  } else {
+    if (!config?.url) return NextResponse.json({ error: "该渠道类型需填写 URL" }, { status: 400 });
   }
   const { data, error } = await createAdminClient()
     .from("alert_channels")

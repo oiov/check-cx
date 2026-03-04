@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Pencil, Trash2, Plus, Radio, MoreHorizontal } from "lucide-react";
+import { Pencil, Trash2, Plus, Radio, MoreHorizontal, Send } from "lucide-react";
+import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { CrudDialog } from "@/components/admin/crud-dialog";
 import { Pagination } from "@/components/admin/pagination";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-type ChannelType = "webhook" | "feishu" | "dingtalk";
+type ChannelType = "webhook" | "feishu" | "dingtalk" | "pushplus";
 
 interface ChannelRow {
   id: string;
@@ -23,6 +24,7 @@ interface ChannelForm {
   type: ChannelType;
   config_url: string;
   config_secret: string;
+  config_token: string;
   enabled: boolean;
 }
 
@@ -30,22 +32,25 @@ const TYPE_COLORS: Record<ChannelType, string> = {
   webhook: "bg-blue-500/10 text-blue-600",
   feishu: "bg-green-500/10 text-green-600",
   dingtalk: "bg-orange-500/10 text-orange-600",
+  pushplus: "bg-pink-500/10 text-pink-600",
 };
 
 const TYPE_LABELS: Record<ChannelType, string> = {
   webhook: "Webhook",
   feishu: "飞书",
   dingtalk: "钉钉",
+  pushplus: "PushPlus",
 };
 
 const URL_LABEL: Record<ChannelType, string> = {
   webhook: "Webhook URL",
   feishu: "飞书机器人 URL",
   dingtalk: "钉钉机器人 URL",
+  pushplus: "PushPlus Token",
 };
 
 function defaultForm(): ChannelForm {
-  return { name: "", type: "webhook", config_url: "", config_secret: "", enabled: true };
+  return { name: "", type: "webhook", config_url: "", config_secret: "", config_token: "", enabled: true };
 }
 
 export default function ChannelsPage() {
@@ -58,6 +63,8 @@ export default function ChannelsPage() {
   const [form, setForm] = useState<ChannelForm>(defaultForm());
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/admin/alerts/channels");
@@ -79,6 +86,7 @@ export default function ChannelsPage() {
       type: row.type,
       config_url: (row.config.url as string) ?? "",
       config_secret: (row.config.secret as string) ?? "",
+      config_token: (row.config.token as string) ?? "",
       enabled: row.enabled,
     });
     setDialogOpen(true);
@@ -86,11 +94,17 @@ export default function ChannelsPage() {
 
   async function handleSubmit() {
     if (!form.name) { setMsg("名称必填"); return; }
-    if (!form.config_url) { setMsg("URL 必填"); return; }
+    let config: Record<string, unknown>;
+    if (form.type === "pushplus") {
+      if (!form.config_token) { setMsg("Token 必填"); return; }
+      config = { token: form.config_token };
+    } else {
+      if (!form.config_url) { setMsg("URL 必填"); return; }
+      config = { url: form.config_url };
+      if (form.type === "webhook" && form.config_secret) config.secret = form.config_secret;
+    }
     setLoading(true);
     setMsg("");
-    const config: Record<string, unknown> = { url: form.config_url };
-    if (form.type === "webhook" && form.config_secret) config.secret = form.config_secret;
     const body = { name: form.name, type: form.type, config, enabled: form.enabled };
     const url = editRow ? `/api/admin/alerts/channels/${editRow.id}` : "/api/admin/alerts/channels";
     const method = editRow ? "PUT" : "POST";
@@ -98,6 +112,21 @@ export default function ChannelsPage() {
     setLoading(false);
     if (res.ok) { setDialogOpen(false); load(); }
     else { const d = await res.json(); setMsg(d.error ?? "操作失败"); }
+  }
+
+  async function handleTest(row: ChannelRow) {
+    setTestingId(row.id);
+    try {
+      const res = await fetch(`/api/admin/alerts/channels/${row.id}/test`, { method: "POST" });
+      if (res.ok) {
+        toast.success(`「${row.name}」测试通知发送成功`);
+      } else {
+        const d = await res.json();
+        toast.error(`发送失败：${d.error ?? "未知错误"}`);
+      }
+    } finally {
+      setTestingId(null);
+    }
   }
 
   async function handleDelete(id: string) {
@@ -129,7 +158,7 @@ export default function ChannelsPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
-              {["名称", "类型", "URL", "启用", "创建时间", ""].map((h) => (
+              {["名称", "类型", "凭据", "启用", "创建时间", ""].map((h) => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-medium text-muted-foreground">{h}</th>
               ))}
             </tr>
@@ -144,7 +173,9 @@ export default function ChannelsPage() {
                   </span>
                 </td>
                 <td className="px-3 py-2 text-xs text-muted-foreground truncate max-w-[220px]">
-                  {(row.config.url as string) ?? "—"}
+                  {row.type === "pushplus"
+                    ? `••••${((row.config.token as string) ?? "").slice(-8)}`
+                    : (row.config.url as string) ?? "—"}
                 </td>
                 <td className="px-3 py-2">
                   <Switch checked={row.enabled} onCheckedChange={(v) => toggleEnabled(row, v)} />
@@ -162,6 +193,13 @@ export default function ChannelsPage() {
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => openEdit(row)}>
                         <Pencil className="h-3.5 w-3.5" />编辑
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handleTest(row)}
+                        disabled={testingId === row.id}
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        {testingId === row.id ? "发送中…" : "测试"}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => setDeleteId(row.id)} className="text-destructive focus:text-destructive">
@@ -201,18 +239,25 @@ export default function ChannelsPage() {
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">类型</label>
-            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ChannelType })}
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ChannelType, config_url: "", config_secret: "", config_token: "" })}
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
               <option value="webhook">Webhook</option>
               <option value="feishu">飞书</option>
               <option value="dingtalk">钉钉</option>
+              <option value="pushplus">PushPlus</option>
             </select>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">{URL_LABEL[form.type]}</label>
-            <input value={form.config_url} onChange={(e) => setForm({ ...form, config_url: e.target.value })}
-              placeholder="https://..."
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
+            {form.type === "pushplus" ? (
+              <input value={form.config_token} onChange={(e) => setForm({ ...form, config_token: e.target.value })}
+                placeholder="PushPlus Token"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
+            ) : (
+              <input value={form.config_url} onChange={(e) => setForm({ ...form, config_url: e.target.value })}
+                placeholder="https://..."
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
+            )}
           </div>
           {form.type === "webhook" && (
             <div>

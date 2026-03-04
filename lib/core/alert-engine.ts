@@ -7,6 +7,7 @@ import { shouldTrigger } from "../alerts/conditions";
 import { sendWebhook } from "../alerts/webhook";
 import { sendFeishu } from "../alerts/feishu";
 import { sendDingTalk } from "../alerts/dingtalk";
+import { sendPushPlus } from "../alerts/pushplus";
 import { logError } from "../utils";
 
 export async function evaluateAlerts(
@@ -101,6 +102,8 @@ async function dispatchToChannel(
       await sendFeishu(channel.config as { url: string }, title, content);
     } else if (channel.type === "dingtalk") {
       await sendDingTalk(channel.config as { url: string }, title, content);
+    } else if (channel.type === "pushplus") {
+      await sendPushPlus(channel.config as { token: string }, title, content);
     }
   } catch (err) {
     sendError = err instanceof Error ? err.message : String(err);

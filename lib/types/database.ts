@@ -85,7 +85,7 @@ export interface SiteSettingRow {
 export interface AlertChannelRow {
   id: string;
   name: string;
-  type: "webhook" | "feishu" | "dingtalk";
+  type: "webhook" | "feishu" | "dingtalk" | "pushplus";
   config: Record<string, unknown>;
   enabled: boolean;
   created_at: string;

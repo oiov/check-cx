@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Menu, Activity } from "lucide-react";
+import { Toaster } from "sonner";
 import { AdminSidebar } from "./sidebar";
 import { AdminNoticeBanner } from "./admin-notice-banner";
 
@@ -52,6 +53,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
       </div>
+      <Toaster richColors position="top-right" />
     </div>
   );
 }
