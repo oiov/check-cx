@@ -65,8 +65,9 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({} as RunChecksRequestBody));
-  const ids = Array.isArray(body.ids)
-    ? body.ids.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  const rawIds: unknown[] = Array.isArray(body.ids) ? body.ids : [];
+  const ids = rawIds.length > 0
+    ? rawIds.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
   const failOnIssues = body.failOnIssues !== false;
 
