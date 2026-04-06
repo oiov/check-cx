@@ -25,6 +25,7 @@ interface ConfigRow {
   group_name: string | null;
   request_header: unknown;
   metadata: unknown;
+  stream_mode: "stream" | "generate" | null;
 }
 
 interface TestResult {
@@ -109,6 +110,7 @@ export default function ConfigsPage() {
       group_name: row.group_name ?? "",
       request_header: row.request_header ? JSON.stringify(row.request_header, null, 2) : "",
       metadata: row.metadata ? JSON.stringify(row.metadata, null, 2) : "",
+      stream_mode: row.stream_mode ?? "stream",
       enabled: row.enabled,
       is_maintenance: row.is_maintenance,
     });
@@ -126,6 +128,7 @@ export default function ConfigsPage() {
       group_name: row.group_name ?? "",
       request_header: row.request_header ? JSON.stringify(row.request_header, null, 2) : "",
       metadata: row.metadata ? JSON.stringify(row.metadata, null, 2) : "",
+      stream_mode: row.stream_mode ?? "stream",
       enabled: row.enabled,
       is_maintenance: row.is_maintenance,
     });
@@ -183,6 +186,7 @@ export default function ConfigsPage() {
       group_name: batchForm.group_name || null,
       request_header: reqHeader,
       metadata: meta,
+      stream_mode: batchForm.stream_mode === "generate" ? "generate" : null,
       enabled: batchForm.enabled,
       is_maintenance: batchForm.is_maintenance,
     };

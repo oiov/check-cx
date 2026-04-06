@@ -41,6 +41,7 @@ const themeBootScript = `(()=>{
   const root = document.documentElement;
   root.classList.toggle('dark', isDark);
   root.style.colorScheme = isDark ? 'dark' : 'light';
+  try { if (window.self !== window.top) root.classList.add('in-iframe'); } catch(e) { root.classList.add('in-iframe'); }
 })();`;
 
 export default function RootLayout({

@@ -15,6 +15,7 @@ export interface ConfigFormData {
   group_name: string;
   request_header: string;
   metadata: string;
+  stream_mode: "stream" | "generate";
   enabled: boolean;
   is_maintenance: boolean;
 }
@@ -88,6 +89,18 @@ export function ConfigForm({ data, onChange, isEdit, groups }: ConfigFormProps) 
         <Label htmlFor="cfg-metadata">Metadata (JSON)</Label>
         <Textarea id="cfg-metadata" value={data.metadata} onChange={(e) => set("metadata", e.target.value)} placeholder='{"temperature": 0.5}' className="font-mono text-xs" rows={3} />
       </div>
+      <div className="space-y-1.5">
+        <Label>检测模式</Label>
+        <Select value={data.stream_mode} onValueChange={(v) => set("stream_mode", v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="stream">流式（stream，默认）</SelectItem>
+            <SelectItem value="generate">非流式（generate）</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
           <Switch id="cfg-enabled" checked={data.enabled} onCheckedChange={(v) => set("enabled", v)} />
@@ -104,5 +117,5 @@ export function ConfigForm({ data, onChange, isEdit, groups }: ConfigFormProps) 
 
 export const defaultConfigForm = (): ConfigFormData => ({
   name: "", type: "openai", model: "", endpoint: "", api_key: "",
-  group_name: "", request_header: "", metadata: "", enabled: true, is_maintenance: false,
+  group_name: "", request_header: "", metadata: "", stream_mode: "stream", enabled: true, is_maintenance: false,
 });

@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
       group_name,
       request_header,
       metadata,
+      stream_mode,
       enabled = true,
       is_maintenance = false,
     } = body;
@@ -50,6 +51,7 @@ export async function POST(request: NextRequest) {
       group_name: group_name || null,
       request_header: request_header || null,
       metadata: metadata || null,
+      stream_mode: stream_mode || null,
     }));
 
     const { data, error } = await admin

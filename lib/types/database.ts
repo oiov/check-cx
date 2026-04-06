@@ -18,6 +18,7 @@ export interface CheckConfigRow {
   request_header?: Record<string, string> | null;
   metadata?: Record<string, unknown> | null;
   group_name?: string | null;
+  stream_mode?: "stream" | "generate" | null;
   created_at?: string;
 }
 

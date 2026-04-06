@@ -124,6 +124,10 @@
     @apply relative min-h-screen;
   }
 
+  html.in-iframe body {
+    padding-top: 64px !important;
+  }
+
   body::before {
     content: "";
     position: fixed;

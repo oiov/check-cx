@@ -16,9 +16,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (!(await requireAuth())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await request.json();
-  const { name, type, model, endpoint, api_key, enabled, is_maintenance, group_name, request_header, metadata } = body;
+  const { name, type, model, endpoint, api_key, enabled, is_maintenance, group_name, request_header, metadata, stream_mode } = body;
 
-  const update: Record<string, unknown> = { name, type, model, endpoint, enabled, is_maintenance, group_name: group_name || null, request_header: request_header || null, metadata: metadata || null, updated_at: new Date().toISOString() };
+  const update: Record<string, unknown> = { name, type, model, endpoint, enabled, is_maintenance, group_name: group_name || null, request_header: request_header || null, metadata: metadata || null, stream_mode: stream_mode || null, updated_at: new Date().toISOString() };
   if (api_key) update.api_key = api_key;
 
   const admin = createAdminClient();

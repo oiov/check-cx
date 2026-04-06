@@ -21,6 +21,7 @@ export interface BatchConfigFormData {
   group_name: string;
   request_header: string;
   metadata: string;
+  stream_mode: "stream" | "generate";
   enabled: boolean;
   is_maintenance: boolean;
   selectedModels: Set<string>;
@@ -258,6 +259,19 @@ export function BatchConfigForm({ data, onChange, groups }: BatchConfigFormProps
         />
       </div>
 
+      <div className="space-y-1.5">
+        <Label>检测模式</Label>
+        <Select value={data.stream_mode} onValueChange={(v) => set("stream_mode", v)}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="stream">流式（stream，默认）</SelectItem>
+            <SelectItem value="generate">非流式（generate）</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-2">
           <Switch
@@ -287,6 +301,7 @@ export const defaultBatchConfigForm = (): BatchConfigFormData => ({
   group_name: "",
   request_header: "",
   metadata: "",
+  stream_mode: "stream",
   enabled: true,
   is_maintenance: false,
   selectedModels: new Set(),
