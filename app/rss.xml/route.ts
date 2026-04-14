@@ -50,28 +50,30 @@ export async function GET() {
         .join(" | ");
 
       return [
-        "<item>",
-        `<title>${escapeXml(itemTitle)}</title>`,
-        itemLink ? `<link>${escapeXml(itemLink)}</link>` : "",
-        `<guid isPermaLink="false">${escapeXml(`${latest.id}:${latest.checkedAt}`)}</guid>`,
-        `<pubDate>${new Date(latest.checkedAt).toUTCString()}</pubDate>`,
-        `<description>${escapeXml(itemDescription)}</description>`,
-        "</item>",
-      ].filter(Boolean).join("");
+        "  <item>",
+        `    <title>${escapeXml(itemTitle)}</title>`,
+        itemLink ? `    <link>${escapeXml(itemLink)}</link>` : "",
+        `    <guid isPermaLink="false">${escapeXml(`${latest.id}:${latest.checkedAt}`)}</guid>`,
+        `    <pubDate>${new Date(latest.checkedAt).toUTCString()}</pubDate>`,
+        `    <description>${escapeXml(itemDescription)}</description>`,
+        "  </item>",
+      ]
+        .filter(Boolean)
+        .join("\n");
     })
-    .join("");
+    .join("\n");
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
-<title>${escapeXml(title)}</title>
-<description>${escapeXml(description)}</description>
-${homeUrl ? `<link>${escapeXml(homeUrl)}</link>` : ""}
-<language>zh-cn</language>
-<lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-<generator>Check CX</generator>
-<atom:link href="${escapeXml(feedUrl)}" rel="self" type="application/rss+xml" xmlns:atom="http://www.w3.org/2005/Atom" />
-${itemsXml}
+  <title>${escapeXml(title)}</title>
+  <description>${escapeXml(description)}</description>
+${homeUrl ? `  <link>${escapeXml(homeUrl)}</link>` : ""}
+  <language>zh-cn</language>
+  <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+  <generator>Check CX</generator>
+  <atom:link href="${escapeXml(feedUrl)}" rel="self" type="application/rss+xml" />
+${itemsXml ? `${itemsXml}\n` : ""}
 </channel>
 </rss>`;
 
@@ -82,4 +84,3 @@ ${itemsXml}
     },
   });
 }
-
