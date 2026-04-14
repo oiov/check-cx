@@ -63,15 +63,15 @@ const themeBootScript = `(()=>{
   try { inIframe = window.self !== window.top; } catch(e) { inIframe = true; }
 
   const hour = new Date().getHours();
-  const isDark = inIframe ? true : (hour >= 19 || hour < 7);
+  const isDark = inIframe ? false : (hour >= 19 || hour < 7);
 
   root.classList.toggle('in-iframe', inIframe);
   root.classList.toggle('dark', isDark);
   root.style.colorScheme = isDark ? 'dark' : 'light';
 
-  // iframe 场景：强制暗色，并锁定 next-themes 的持久化值，避免被用户/系统偏好覆盖
+  // iframe 场景：强制亮色，并锁定 next-themes 的持久化值，避免被用户/系统偏好覆盖
   if (inIframe) {
-    try { localStorage.setItem('theme', 'dark'); } catch(e) {}
+    try { localStorage.setItem('theme', 'light'); } catch(e) {}
   }
 })();`;
 

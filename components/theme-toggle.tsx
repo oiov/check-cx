@@ -19,7 +19,7 @@ export function ThemeToggle() {
 
   React.useEffect(() => {
     if (inIframe) {
-      setTheme("dark")
+      setTheme("light")
     }
   }, [inIframe, setTheme])
 
