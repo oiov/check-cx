@@ -61,9 +61,20 @@ const themeBootScript = `(()=>{
   const root = document.documentElement;
   let inIframe = false;
   try { inIframe = window.self !== window.top; } catch(e) { inIframe = true; }
+  let theme = 'light';
 
-  const hour = new Date().getHours();
-  const isDark = inIframe ? false : (hour >= 19 || hour < 7);
+  try {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'light' || saved === 'dark') {
+      theme = saved;
+    }
+  } catch(e) {}
+
+  if (inIframe) {
+    theme = 'light';
+  }
+
+  const isDark = theme === 'dark';
 
   root.classList.toggle('in-iframe', inIframe);
   root.classList.toggle('dark', isDark);
@@ -94,8 +105,8 @@ export default function RootLayout({
         <NextTopLoader color="var(--foreground)" showSpinner={false} />
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <NotificationBanner />
