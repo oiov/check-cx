@@ -56,7 +56,7 @@ export async function loadProviderConfigsFromDB(options?: {
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("check_configs")
-      .select("id, name, type, model, endpoint, api_key, is_maintenance, request_header, metadata, group_name")
+      .select("id, name, type, model, endpoint, api_key, is_maintenance, request_header, metadata, group_name, stream_mode")
       .eq("enabled", true)
       .order("id");
 
@@ -73,7 +73,7 @@ export async function loadProviderConfigsFromDB(options?: {
     }
 
     const configs: ProviderConfig[] = data.map(
-      (row: Pick<CheckConfigRow, "id" | "name" | "type" | "model" | "endpoint" | "api_key" | "is_maintenance" | "request_header" | "metadata" | "group_name">) => ({
+      (row: Pick<CheckConfigRow, "id" | "name" | "type" | "model" | "endpoint" | "api_key" | "is_maintenance" | "request_header" | "metadata" | "group_name" | "stream_mode">) => ({
         id: row.id,
         name: row.name,
         type: row.type as ProviderType,
@@ -84,6 +84,7 @@ export async function loadProviderConfigsFromDB(options?: {
         requestHeaders: row.request_header || null,
         metadata: row.metadata || null,
         groupName: row.group_name || null,
+        streamMode: row.stream_mode || null,
       })
     );
 

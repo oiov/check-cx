@@ -507,29 +507,38 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
         ? { openai: { reasoningEffort } }
         : undefined;
 
-    // 捕获流处理过程中的错误
+    let collectedResponse = "";
     let streamError: AIApiCallError | null = null;
 
-    const result = streamText({
-      model,
-      prompt: challenge.prompt,
-      abortSignal: controller.signal,
-      ...(providerOptions && { providerOptions }),
-      onError({ error }) {
-        streamError = error as AIApiCallError;
-      },
-    });
+    if (config.streamMode === "generate") {
+      // 非流式模式：使用 generateText，适用于只支持非流式响应的接口
+      const result = await generateText({
+        model,
+        prompt: challenge.prompt,
+        abortSignal: controller.signal,
+        ...(providerOptions && { providerOptions }),
+      });
+      collectedResponse = result.text;
+    } else {
+      // 流式模式（默认）：使用 streamText，测量首 token 延迟
+      const result = streamText({
+        model,
+        prompt: challenge.prompt,
+        abortSignal: controller.signal,
+        ...(providerOptions && { providerOptions }),
+        onError({ error }) {
+          streamError = error as AIApiCallError;
+        },
+      });
 
-    // 收集完整响应
-    let collectedResponse = "";
-    for await (const chunk of result.textStream) {
-      collectedResponse += chunk;
+      for await (const chunk of result.textStream) {
+        collectedResponse += chunk;
+      }
     }
 
     const latencyMs = Date.now() - startedAt;
     const params = await buildParams();
 
-    // 检查流处理过程中是否有错误
     if (streamError) {
       logCheckResult(config, challenge.prompt, "", challenge.expectedAnswer, null);
       return buildCheckResult(params, "error", latencyMs, getErrorMessage(streamError));
