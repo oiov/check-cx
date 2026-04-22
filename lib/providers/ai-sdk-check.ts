@@ -39,18 +39,24 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 
 /** 性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
 function getDegradedThresholdMs(): number {
-  const v = Number(getSiteSettingSync("degraded_threshold_ms", "6000"));
-  return Number.isFinite(v) && v > 0 ? v : 6_000;
+  const v = Number(getSiteSettingSync("degraded_threshold_ms", "100000"));
+  return Number.isFinite(v) && v > 0 ? v : 100_000;
 }
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
-const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
+const EXCLUDED_METADATA_KEYS = new Set([
+  "model",
+  "prompt",
+  "messages",
+  "abortSignal",
+]);
 
 /** 用于从完整端点 URL 中提取 baseURL 的正则表达式 */
 const API_PATH_SUFFIX_REGEX = /\/(chat\/completions|responses|messages)\/?$/;
 
 /** 原生 Gemini 端点识别正则：包含 /models/ 且以 :generateContent 或 :streamGenerateContent 结尾 */
-const GOOGLE_GENERATIVE_API_REGEX = /\/v\d+\w*\/models\/[^/:]+:(generateContent|streamGenerateContent)\/?$/;
+const GOOGLE_GENERATIVE_API_REGEX =
+  /\/v\d+\w*\/models\/[^/:]+:(generateContent|streamGenerateContent)\/?$/;
 
 /**
  * 判断端点是否为原生 Gemini API
@@ -59,7 +65,9 @@ const GOOGLE_GENERATIVE_API_REGEX = /\/v\d+\w*\/models\/[^/:]+:(generateContent|
  * - https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
  * - https://generativelanguage.googleapis.com/v1/models/gemini-pro:streamGenerateContent
  */
-function isGoogleGenerativeEndpoint(endpoint: string | null | undefined): boolean {
+function isGoogleGenerativeEndpoint(
+  endpoint: string | null | undefined,
+): boolean {
   if (!endpoint) return false;
   return GOOGLE_GENERATIVE_API_REGEX.test(endpoint);
 }
@@ -72,7 +80,9 @@ function isGoogleGenerativeEndpoint(endpoint: string | null | undefined): boolea
  * // => "https://generativelanguage.googleapis.com/v1beta"
  */
 function extractGoogleBaseURL(endpoint: string): string {
-  const match = endpoint.match(/^(https:\/\/generativelanguage.googleapis\.com\/v\d+\w*)/);
+  const match = endpoint.match(
+    /^(https:\/\/generativelanguage.googleapis\.com\/v\d+\w*)/,
+  );
   return match?.[1] || endpoint;
 }
 
@@ -172,7 +182,9 @@ function parseModelDirective(model: string): {
   if (!trimmed) return { modelId: model };
 
   // 匹配 model@effort 或 model#effort 格式
-  const directiveMatch = trimmed.match(/^(.*?)[@#](mini|minimal|low|medium|high)$/i);
+  const directiveMatch = trimmed.match(
+    /^(.*?)[@#](mini|minimal|low|medium|high)$/i,
+  );
   if (directiveMatch) {
     const [, baseModel, effortKey] = directiveMatch;
     return {
@@ -182,7 +194,9 @@ function parseModelDirective(model: string): {
   }
 
   // 推理模型默认使用 medium
-  const isReasoningModel = REASONING_MODEL_PATTERNS.some((pattern) => pattern.test(trimmed));
+  const isReasoningModel = REASONING_MODEL_PATTERNS.some((pattern) =>
+    pattern.test(trimmed),
+  );
   if (isReasoningModel) {
     return { modelId: trimmed, reasoningEffort: "medium" };
   }
@@ -201,12 +215,14 @@ function parseModelDirective(model: string): {
  * 用户自定义的 metadata 中如果包含这些字段会导致冲突
  */
 function filterMetadata(
-  metadata: Record<string, unknown> | null | undefined
+  metadata: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> | null {
   if (!metadata) return null;
 
   const filtered = Object.fromEntries(
-    Object.entries(metadata).filter(([key]) => !EXCLUDED_METADATA_KEYS.has(key))
+    Object.entries(metadata).filter(
+      ([key]) => !EXCLUDED_METADATA_KEYS.has(key),
+    ),
   );
 
   return Object.keys(filtered).length > 0 ? filtered : null;
@@ -224,7 +240,7 @@ function filterMetadata(
  */
 function createCustomFetch(
   metadata: Record<string, unknown> | null,
-  headers: Record<string, string>
+  headers: Record<string, string>,
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     // 使用 Headers API 确保用户 headers 完全覆盖 SDK headers
@@ -240,8 +256,11 @@ function createCustomFetch(
 
     // POST 请求：尝试将 metadata 合并到请求体
     try {
-      const originalBody = typeof init.body === "string" ? JSON.parse(init.body) : init.body;
-      const mergedBody = metadata ? { ...originalBody, ...metadata } : originalBody;
+      const originalBody =
+        typeof init.body === "string" ? JSON.parse(init.body) : init.body;
+      const mergedBody = metadata
+        ? { ...originalBody, ...metadata }
+        : originalBody;
       return fetch(input, {
         ...init,
         headers: mergedHeaders,
@@ -279,25 +298,42 @@ function createModel(config: ProviderConfig) {
     "User-Agent": "check-cx/0.1.0",
     ...config.requestHeaders,
   };
-  const customFetch = createCustomFetch(filterMetadata(config.metadata), headers);
+  const customFetch = createCustomFetch(
+    filterMetadata(config.metadata),
+    headers,
+  );
 
   switch (config.type) {
     case "openai": {
-      const provider = createOpenAI({ apiKey: config.apiKey, baseURL, fetch: customFetch });
+      const provider = createOpenAI({
+        apiKey: config.apiKey,
+        baseURL,
+        fetch: customFetch,
+      });
 
       // Responses API 使用 provider.responses()，Chat Completions 使用 provider.chat()
       const isResponses = isResponsesEndpoint(endpoint);
       return {
-        model: isResponses ? provider.responses(modelId) : provider.chat(modelId),
+        model: isResponses
+          ? provider.responses(modelId)
+          : provider.chat(modelId),
         reasoningEffort,
         isResponses,
       };
     }
 
     case "anthropic": {
-      const provider = createAnthropic({ apiKey: config.apiKey, baseURL, fetch: customFetch });
+      const provider = createAnthropic({
+        apiKey: config.apiKey,
+        baseURL,
+        fetch: customFetch,
+      });
       // Anthropic 不支持 reasoning_effort
-      return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
+      return {
+        model: provider(modelId),
+        reasoningEffort: undefined,
+        isResponses: false,
+      };
     }
 
     case "gemini": {
@@ -324,7 +360,11 @@ function createModel(config: ProviderConfig) {
           baseURL,
           fetch: customFetch,
         });
-        return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
+        return {
+          model: provider(modelId),
+          reasoningEffort: undefined,
+          isResponses: false,
+        };
       }
     }
 
@@ -390,13 +430,17 @@ function getErrorMessage(error: AIApiCallError): string {
   if (error.responseBody) {
     const extracted = extractMessageFromBody(error.responseBody);
     if (extracted) {
-      return error.statusCode ? `[${error.statusCode}] ${extracted}` : extracted;
+      return error.statusCode
+        ? `[${error.statusCode}] ${extracted}`
+        : extracted;
     }
   }
 
   // 回退到基础 message
   if (error.message) {
-    return error.statusCode ? `[${error.statusCode}] ${error.message}` : error.message;
+    return error.statusCode
+      ? `[${error.statusCode}] ${error.message}`
+      : error.message;
   }
 
   return "未知错误";
@@ -422,7 +466,7 @@ function buildCheckResult(
   params: ResultBuilderParams,
   status: HealthStatus | "validation_failed" | "failed" | "error",
   latencyMs: number | null,
-  message: string
+  message: string,
 ): CheckResult {
   return {
     id: params.config.id,
@@ -452,13 +496,14 @@ function logCheckResult(
   prompt: string,
   response: string,
   expectedAnswer: string,
-  isValid: boolean | null
+  isValid: boolean | null,
 ): void {
-  const validStatus = isValid === null ? "失败(空回复)" : isValid ? "通过" : "失败";
+  const validStatus =
+    isValid === null ? "失败(空回复)" : isValid ? "通过" : "失败";
   const groupName = config.groupName || "默认";
   const normalizedPrompt = prompt.replace(/\r?\n/g, " ");
   console.log(
-    `[${config.type}] ${groupName} | ${config.name} | Q: ${normalizedPrompt} | A: ${response || "(空)"} | 期望: ${expectedAnswer} | 验证: ${validStatus}`
+    `[${config.type}] ${groupName} | ${config.name} | Q: ${normalizedPrompt} | A: ${response || "(空)"} | 期望: ${expectedAnswer} | 验证: ${validStatus}`,
   );
 }
 
@@ -482,7 +527,9 @@ function logCheckResult(
  * - failed：请求失败、超时或回复为空
  * - error：请求过程中发生异常
  */
-export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResult> {
+export async function checkWithAiSdk(
+  config: ProviderConfig,
+): Promise<CheckResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const startedAt = Date.now();
@@ -540,19 +587,45 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     const params = await buildParams();
 
     if (streamError) {
-      logCheckResult(config, challenge.prompt, "", challenge.expectedAnswer, null);
-      return buildCheckResult(params, "error", latencyMs, getErrorMessage(streamError));
+      logCheckResult(
+        config,
+        challenge.prompt,
+        "",
+        challenge.expectedAnswer,
+        null,
+      );
+      return buildCheckResult(
+        params,
+        "error",
+        latencyMs,
+        getErrorMessage(streamError),
+      );
     }
 
     // 空回复
     if (!collectedResponse.trim()) {
-      logCheckResult(config, challenge.prompt, "", challenge.expectedAnswer, null);
+      logCheckResult(
+        config,
+        challenge.prompt,
+        "",
+        challenge.expectedAnswer,
+        null,
+      );
       return buildCheckResult(params, "failed", latencyMs, "回复为空");
     }
 
     // 验证答案
-    const { valid, extractedNumbers } = validateResponse(collectedResponse, challenge.expectedAnswer);
-    logCheckResult(config, challenge.prompt, collectedResponse, challenge.expectedAnswer, valid);
+    const { valid, extractedNumbers } = validateResponse(
+      collectedResponse,
+      challenge.expectedAnswer,
+    );
+    logCheckResult(
+      config,
+      challenge.prompt,
+      collectedResponse,
+      challenge.expectedAnswer,
+      valid,
+    );
 
     if (!valid) {
       const actualNumbers = extractedNumbers?.join(", ") || "(无数字)";
@@ -560,18 +633,27 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
         params,
         "validation_failed",
         latencyMs,
-        `回复验证失败: 期望 ${challenge.expectedAnswer}, 实际: ${actualNumbers}`
+        `回复验证失败: 期望 ${challenge.expectedAnswer}, 实际: ${actualNumbers}`,
       );
     }
 
     // 判定健康状态
-    const status: HealthStatus = latencyMs <= getDegradedThresholdMs() ? "operational" : "degraded";
-    const message = status === "degraded" ? `响应成功但耗时 ${latencyMs}ms` : `验证通过 (${latencyMs}ms)`;
+    const status: HealthStatus =
+      latencyMs <= getDegradedThresholdMs() ? "operational" : "degraded";
+    const message =
+      status === "degraded"
+        ? `响应成功但耗时 ${latencyMs}ms`
+        : `验证通过 (${latencyMs}ms)`;
 
     return buildCheckResult(params, status, latencyMs, message);
   } catch (error) {
     const params = await buildParams();
-    return buildCheckResult(params, "error", null, getErrorMessage(error as AIApiCallError));
+    return buildCheckResult(
+      params,
+      "error",
+      null,
+      getErrorMessage(error as AIApiCallError),
+    );
   } finally {
     clearTimeout(timeout);
   }
