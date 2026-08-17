@@ -4,7 +4,7 @@ import {ChevronLeft, SearchX} from "lucide-react";
 export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-4 text-center">
-      <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl bg-muted/30 shadow-sm backdrop-blur-sm">
+      <div className="mb-8 flex h-20 w-20 items-center justify-center rounded-2xl bg-muted">
         <SearchX className="h-10 w-10 text-muted-foreground" />
       </div>
 
@@ -18,7 +18,7 @@ export default function NotFound() {
 
       <Link
         href="/"
-        className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-medium text-background transition-transform hover:scale-105 active:scale-95"
+        className="inline-flex items-center gap-2 rounded-full bg-foreground px-6 py-2.5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
       >
         <ChevronLeft className="h-4 w-4" />
         Back to Dashboard

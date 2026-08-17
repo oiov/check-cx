@@ -7,11 +7,25 @@ import type {PostgrestError} from "@supabase/supabase-js";
 import {createAdminClient} from "../supabase/admin";
 import type {CheckResult, HistorySnapshot} from "../types";
 import {logError} from "../utils";
+import { getSiteSettingSync } from "../core/site-settings";
 
 /**
  * 每个 Provider 最多保留的历史记录数
  */
 export const MAX_POINTS_PER_PROVIDER = 60;
+
+function getMaxPointsPerProvider(): number {
+  const raw = Number(
+    getSiteSettingSync(
+      "history_retention_count",
+      String(MAX_POINTS_PER_PROVIDER)
+    )
+  );
+  if (!Number.isFinite(raw)) {
+    return MAX_POINTS_PER_PROVIDER;
+  }
+  return Math.max(1, Math.min(1000, Math.trunc(raw)));
+}
 
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 7;
@@ -27,6 +41,12 @@ export const HISTORY_RETENTION_DAYS = (() => {
 
 const RPC_RECENT_HISTORY = "get_recent_check_history";
 const RPC_PRUNE_HISTORY = "prune_check_history";
+
+/**
+ * append 后自动清理的最小间隔：12 小时
+ * 避免每个轮询周期都执行一次全表范围 DELETE
+ */
+const AUTO_PRUNE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -49,10 +69,21 @@ interface RpcHistoryRow {
   group_name: string | null;
 }
 
+interface JoinedConfigRow {
+  id: string;
+  name: string;
+  type: string;
+  endpoint: string;
+  group_name: string | null;
+  check_models?: { model: string } | Array<{ model: string }> | null;
+}
+
 /**
  * SnapshotStore 负责与数据库交互，提供统一的读/写/清理接口
  */
 class SnapshotStore {
+  private lastAutoPruneAt = 0;
+
   async fetch(options?: HistoryQueryOptions): Promise<HistorySnapshot> {
     const normalizedIds = normalizeAllowedIds(options?.allowedIds);
     if (Array.isArray(normalizedIds) && normalizedIds.length === 0) {
@@ -60,7 +91,7 @@ class SnapshotStore {
     }
 
     const supabase = createAdminClient();
-    const limitPerConfig = options?.limitPerConfig ?? MAX_POINTS_PER_PROVIDER;
+    const limitPerConfig = options?.limitPerConfig ?? getMaxPointsPerProvider();
     const { data, error } = await supabase.rpc(
       RPC_RECENT_HISTORY,
       {
@@ -101,7 +132,33 @@ class SnapshotStore {
       return;
     }
 
-    await this.pruneInternal(supabase);
+    // 顺带写入挑战记录（能力评估数据）；基础设施失败的结果没有 challenge 字段，自然被过滤
+    const challengeRecords = results
+      .filter((result) => result.challenge)
+      .map((result) => ({
+        config_id: result.id,
+        difficulty: result.challenge!.difficulty,
+        category: result.challenge!.category,
+        expected_answer: result.challenge!.expectedAnswer,
+        response_excerpt: result.challenge!.responseExcerpt,
+        passed: result.challenge!.passed,
+        latency_ms: result.latencyMs,
+        checked_at: result.checkedAt,
+      }));
+    if (challengeRecords.length > 0) {
+      const { error: challengeError } = await supabase
+        .from("check_challenges")
+        .insert(challengeRecords);
+      if (challengeError) {
+        logError("写入挑战记录失败", challengeError);
+      }
+    }
+
+    const now = Date.now();
+    if (now - this.lastAutoPruneAt >= AUTO_PRUNE_INTERVAL_MS) {
+      this.lastAutoPruneAt = now;
+      await this.pruneInternal(supabase);
+    }
   }
 
   async prune(retentionDays: number = HISTORY_RETENTION_DAYS): Promise<void> {
@@ -159,7 +216,7 @@ function normalizeAllowedIds(
 
 function mapRowsToSnapshot(
   rows: RpcHistoryRow[] | null,
-  limitPerConfig: number = MAX_POINTS_PER_PROVIDER
+  limitPerConfig: number = getMaxPointsPerProvider()
 ): HistorySnapshot {
   if (!rows || rows.length === 0) {
     return {};
@@ -228,9 +285,11 @@ async function fallbackFetchSnapshot(
           id,
           name,
           type,
-          model,
           endpoint,
-          group_name
+          group_name,
+          check_models (
+            model
+          )
         )
       `
       )
@@ -252,14 +311,17 @@ async function fallbackFetchSnapshot(
       if (!configs || !Array.isArray(configs) || configs.length === 0) {
         continue;
       }
-      const config = configs[0];
+      const config = configs[0] as JoinedConfigRow;
+      const model = Array.isArray(config.check_models)
+        ? (config.check_models[0]?.model ?? "")
+        : (config.check_models?.model ?? "");
 
       const result: CheckResult = {
         id: config.id,
         name: config.name,
-        type: config.type,
+        type: config.type as CheckResult["type"],
         endpoint: config.endpoint,
-        model: config.model,
+        model,
         status: record.status as CheckResult["status"],
         latencyMs: record.latency_ms,
         pingLatencyMs: record.ping_latency_ms ?? null,
@@ -280,7 +342,7 @@ async function fallbackFetchSnapshot(
           (a, b) =>
             new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime()
         )
-        .slice(0, MAX_POINTS_PER_PROVIDER);
+        .slice(0, getMaxPointsPerProvider());
     }
 
     return history;
@@ -311,8 +373,16 @@ async function fallbackPruneHistory(
     if (deleteError) {
       logError("fallback 模式下删除历史失败", deleteError);
     }
+
+    const { error: deleteChallengeError } = await supabase
+      .from("check_challenges")
+      .delete()
+      .lt("checked_at", cutoff);
+
+    if (deleteChallengeError) {
+      logError("fallback 模式下删除挑战记录失败", deleteChallengeError);
+    }
   } catch (error) {
     logError("fallback 模式下清理历史异常", error);
   }
 }
-

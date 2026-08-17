@@ -1,20 +1,19 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useState, useSyncExternalStore} from "react";
 import {fetchWithCache, prefetchDashboardData, setCache} from "@/lib/core/frontend-cache";
 import {prefetchGroupData} from "@/lib/core/group-frontend-cache";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
+  ArrowLeft,
   ChevronDown,
   ExternalLink,
   Github,
   GripVertical,
-  LayoutGrid,
-  List,
   RefreshCcw,
   Search,
-  Settings,
   X,
 } from "lucide-react";
 import {
@@ -37,7 +36,7 @@ import {CSS} from "@dnd-kit/utilities";
 
 import {GroupTags} from "@/components/group-tags";
 import {ProviderCard} from "@/components/provider-card";
-import {ProviderListItem} from "@/components/provider-list-item";
+import {StatusSummary} from "@/components/status-summary";
 import {ThemeToggle} from "@/components/theme-toggle";
 import {Collapsible, CollapsibleContent, CollapsibleTrigger} from "@/components/ui/collapsible";
 import {ClientTime} from "@/components/client-time";
@@ -47,18 +46,15 @@ import type {
   DashboardData,
   GroupedProviderTimelines,
   GroupInfoSummary,
-  ProviderTimeline,
 } from "@/lib/types";
-import type { SiteConfig } from "@/lib/utils/site-config-cache";
 import { UNGROUPED_DISPLAY_NAME } from "@/lib/types";
+import {STATUS_META} from "@/lib/core/status";
 import {cn} from "@/lib/utils";
 import {parseTagList, getTagColorClass} from "@/lib/utils/tag-colors";
 
 interface DashboardViewProps {
   /** 首屏由服务端注入的聚合数据，用作前端轮询的初始快照 */
   initialData: DashboardData;
-  /** 站点配置（标题、描述、GitHub 链接等） */
-  siteConfig?: SiteConfig | null;
 }
 
 /** 计算所有 Provider 中最近一次检查的时间戳（毫秒） */
@@ -90,7 +86,6 @@ const PERIOD_OPTIONS: Array<{ value: AvailabilityPeriod; label: string }> = [
 ];
 
 type SortMode = "custom" | "group" | "name";
-type ViewMode = "card" | "list";
 
 const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: "custom", label: "自定义" },
@@ -98,8 +93,9 @@ const SORT_OPTIONS: Array<{ value: SortMode; label: string }> = [
   { value: "name", label: "按名称" },
 ];
 
-const DEFAULT_SITE_TITLE = "Check CX - AI 模型健康监控";
-const DEFAULT_SITE_DESCRIPTION = "实时追踪各大 AI 模型对话接口的可用性、延迟与官方服务状态。";
+const emptySubscribe = () => () => undefined;
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 // 未分组标识常量
 const UNGROUPED_KEY = "__ungrouped__";
@@ -134,7 +130,6 @@ const buildGroupedTimelines = (
       groupName,
       displayName: groupName,
       websiteUrl: info?.websiteUrl,
-      description: info?.description,
       tags: info?.tags ?? "",
       timelines: [...groupTimelines].sort((a, b) =>
         a.latest.name.localeCompare(b.latest.name)
@@ -157,77 +152,14 @@ const buildGroupedTimelines = (
   return groups;
 };
 
-/**
- * 检查单个 Provider 是否匹配搜索词
- */
-function providerMatchesQuery(
-  timeline: ProviderTimeline,
-  query: string
-): boolean {
-  const lower = query.toLowerCase();
-  return (
-    timeline.latest.name.toLowerCase().includes(lower) ||           // 名称
-    timeline.latest.type.toLowerCase().includes(lower) ||           // 类型 (openai/gemini/anthropic)
-    timeline.latest.model.toLowerCase().includes(lower) ||          // 模型 (gpt-4o/claude-opus)
-    timeline.latest.status.toLowerCase().includes(lower) ||         // 状态 (operational/degraded/failed)
-    timeline.latest.endpoint.toLowerCase().includes(lower)          // 端点
-  );
-}
-
-/**
- * 过滤分组内的 Provider（只显示匹配的）
- */
-function filterProvidersInGroup(
-  group: GroupedProviderTimelines,
-  query: string
-): GroupedProviderTimelines | null {
-  const lower = query.toLowerCase();
-
-  // 如果分组名称/描述匹配，显示所有 Provider
-  if (
-    group.displayName.toLowerCase().includes(lower) ||
-    group.description?.toLowerCase().includes(lower)
-  ) {
-    return group;
-  }
-
-  // 否则只过滤匹配的 Provider
-  const filteredTimelines = group.timelines.filter(timeline =>
-    providerMatchesQuery(timeline, lower)
-  );
-
-  return filteredTimelines.length > 0
-    ? { ...group, timelines: filteredTimelines }
-    : null;
-}
-
-/** Tech-style decorative corner plus marker */
-const CornerPlus = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="1" 
-    className={cn("absolute h-4 w-4 text-muted-foreground/40", className)}
-  >
-    <line x1="12" y1="0" x2="12" y2="24" />
-    <line x1="0" y1="12" x2="24" y2="12" />
-  </svg>
-);
-
 /** 分组面板组件 */
 interface GroupPanelProps {
   group: GroupedProviderTimelines;
   timeToNextRefresh: number | null;
-  isCoarsePointer: boolean;
-  activeOfficialCardId: string | null;
-  setActiveOfficialCardId: (id: string | null) => void;
   gridColsClass: string;
   availabilityStats: AvailabilityStatsMap;
   selectedPeriod: AvailabilityPeriod;
-  viewMode: ViewMode;
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
+  defaultOpen?: boolean;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
@@ -259,17 +191,14 @@ function SortableGroupPanel(props: GroupPanelProps & { id: string }) {
 function GroupPanel({
   group,
   timeToNextRefresh,
-  isCoarsePointer,
-  activeOfficialCardId,
-  setActiveOfficialCardId,
   gridColsClass,
   availabilityStats,
   selectedPeriod,
-  viewMode,
-  isOpen,
-  onOpenChange,
+  defaultOpen = false,
   dragHandleProps,
 }: GroupPanelProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
   const statusSummary = useMemo(() => {
     const counts = { operational: 0, degraded: 0, failed: 0, validation_failed: 0, maintenance: 0, error: 0 };
     for (const timeline of group.timelines) {
@@ -284,14 +213,7 @@ function GroupPanel({
   const groupLink = `/group/${encodeURIComponent(group.groupName)}`;
 
   return (
-    <Collapsible
-      open={isOpen}
-      onOpenChange={onOpenChange}
-      className={cn(
-        "border border-border/50 bg-background/40 backdrop-blur-sm",
-        viewMode === "list" ? "rounded-2xl px-3 py-3" : "rounded-3xl p-4 sm:p-6"
-      )}
-    >
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border-b pb-6 last:border-b-0">
       <div className="flex items-center justify-between gap-3 sm:gap-4">
         {dragHandleProps && (
           <div
@@ -302,13 +224,11 @@ function GroupPanel({
             <GripVertical className="h-5 w-5" />
           </div>
         )}
-        <CollapsibleTrigger className="group flex flex-1 min-w-0 items-center gap-3 text-left transition hover:opacity-80 focus-visible:outline-none sm:gap-4">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-black/5 transition-colors group-hover:bg-white/80 dark:bg-white/10 dark:ring-white/10 sm:h-10 sm:w-10">
-            <ChevronDown className="h-4 w-4 text-foreground transition-transform duration-200 group-data-[state=open]:rotate-180 sm:h-5 sm:w-5" />
-          </div>
+        <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:outline-none sm:gap-3">
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h2 className="truncate text-lg font-bold tracking-tight text-foreground sm:text-2xl">
+              <h2 className="truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">
                 {group.displayName}
               </h2>
               <GroupTags tags={group.tags} />
@@ -317,95 +237,38 @@ function GroupPanel({
                   href={group.websiteUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center rounded-full bg-muted/50 p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <ExternalLink className="h-4 w-4" />
+                  <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               )}
             </div>
-            {group.description && (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{group.description}</p>
-            )}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-               {statusSummary.operational > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                   <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                   {statusSummary.operational} 正常
-                 </span>
-               )}
-               {statusSummary.degraded > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                    {statusSummary.degraded} 延迟
-                 </span>
-               )}
-               {statusSummary.failed > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                    {statusSummary.failed} 异常
-                 </span>
-               )}
-               {statusSummary.validation_failed > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
-                    {statusSummary.validation_failed} 验证失败
-                 </span>
-               )}
-               {statusSummary.error > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                    {statusSummary.error} 错误
-                 </span>
-               )}
-               {statusSummary.maintenance > 0 && (
-                 <span className="flex items-center gap-1.5 whitespace-nowrap">
-                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                    {statusSummary.maintenance} 维护
-                 </span>
-               )}
-            </div>
+            <StatusSummary counts={statusSummary} className="mt-0.5 text-xs" />
           </div>
         </CollapsibleTrigger>
-        
+
         <Link
-            href={groupLink}
-            className="group flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground p-0 text-sm font-medium text-background transition-all hover:bg-foreground/90 sm:h-10 sm:w-auto sm:gap-2 sm:px-5 sm:hover:px-6"
+          href={groupLink}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground"
         >
-            <span className="hidden whitespace-nowrap sm:inline">详情</span>
-            <ExternalLink className="h-3.5 w-3.5 opacity-70" />
+          <span className="hidden sm:inline">详情</span>
+          <ExternalLink className="h-3.5 w-3.5" />
         </Link>
       </div>
 
       <CollapsibleContent className="animate-in fade-in-0 slide-in-from-top-2">
-        {viewMode === "list" ? (
-          <div className="mt-2.5 space-y-2">
-            {group.timelines.map((timeline) => (
-              <ProviderListItem
-                key={timeline.id}
-                timeline={timeline}
-                timeToNextRefresh={timeToNextRefresh}
-                availabilityStats={availabilityStats[timeline.id]}
-                selectedPeriod={selectedPeriod}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className={`mt-2 grid gap-4 ${gridColsClass}`}>
-            {group.timelines.map((timeline) => (
-              <ProviderCard
-                key={timeline.id}
-                timeline={timeline}
-                timeToNextRefresh={timeToNextRefresh}
-                isCoarsePointer={isCoarsePointer}
-                activeOfficialCardId={activeOfficialCardId}
-                setActiveOfficialCardId={setActiveOfficialCardId}
-                availabilityStats={availabilityStats[timeline.id]}
-                selectedPeriod={selectedPeriod}
-              />
-            ))}
-          </div>
-        )}
+        <div className={`mt-4 grid gap-4 ${gridColsClass}`}>
+          {group.timelines.map((timeline) => (
+            <ProviderCard
+              key={timeline.id}
+              timeline={timeline}
+              timeToNextRefresh={timeToNextRefresh}
+              availabilityStats={availabilityStats[timeline.id]}
+              selectedPeriod={selectedPeriod}
+            />
+          ))}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -416,7 +279,7 @@ function GroupPanel({
  * - 负责渲染整体头部统计与 Provider 卡片
  * - 在浏览器端按 pollIntervalMs 定时拉取 /api/dashboard 并维护倒计时
  */
-export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
+export function DashboardView({ initialData }: DashboardViewProps) {
   const [data, setData] = useState(initialData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -428,12 +291,11 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
       initialData.generatedAt
     )
   );
-  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
-  const [isDndReady, setIsDndReady] = useState(false);
-  const [activeOfficialCardId, setActiveOfficialCardId] = useState<string | null>(null);
-  const siteTitle = siteConfig?.title?.trim() || DEFAULT_SITE_TITLE;
-  const siteDescription = siteConfig?.description?.trim() || DEFAULT_SITE_DESCRIPTION;
-  const siteLogoUrl = siteConfig?.logoUrl?.trim() || "";
+  const isDndReady = useSyncExternalStore(
+    emptySubscribe,
+    getClientSnapshot,
+    getServerSnapshot
+  );
   
   const { providerTimelines, total, lastUpdated, pollIntervalLabel } = data;
   const availabilityStats: AvailabilityStatsMap = data.availabilityStats ?? {};
@@ -441,9 +303,6 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
     data.trendPeriod ?? "7d"
   );
   const [sortMode, setSortMode] = useState<SortMode>("custom");
-  const [viewMode, setViewMode] = useState<ViewMode>("card");
-  const [openGroupNames, setOpenGroupNames] = useState<Set<string>>(() => new Set());
-  const prevSearchActiveRef = useRef(false);
 
   const initialGroupedTimelines = useMemo(
     () => buildGroupedTimelines(initialData.providerTimelines, initialData.groupInfos),
@@ -462,19 +321,10 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
     [groupedTimelines]
   );
 
-  const persistedGroupOrder = siteConfig?.groupOrder;
-
-  // Initialize order with server-provided (persisted) order when available
-  const [orderedGroupNames, setOrderedGroupNames] = useState<string[]>(() => {
-    const currentNames = initialGroupedTimelines.map((g) => g.groupName);
-    if (!persistedGroupOrder || persistedGroupOrder.length === 0) {
-      return currentNames;
-    }
-    const currentSet = new Set(currentNames);
-    const validSaved = persistedGroupOrder.filter((name) => currentSet.has(name));
-    const newNames = currentNames.filter((name) => !validSaved.includes(name));
-    return [...validSaved, ...newNames];
-  });
+  // Initialize order with default data
+  const [orderedGroupNames, setOrderedGroupNames] = useState<string[]>(() => 
+    initialGroupedTimelines.map((g) => g.groupName)
+  );
 
   const latestCheckTimestamp = useMemo(
     () => getLatestCheckTimestamp(data.providerTimelines),
@@ -493,44 +343,31 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
   );
 
   useEffect(() => {
-    setIsDndReady(true);
-  }, []);
-
-  useEffect(() => {
-    // Client-side only: load from localStorage
-    if (typeof window !== "undefined") {
-      // Load sort mode
+    const frame = window.requestAnimationFrame(() => {
       const savedSortMode = localStorage.getItem("check-cx-sort-mode");
       if (savedSortMode && ["custom", "group", "name"].includes(savedSortMode)) {
         setSortMode(savedSortMode as SortMode);
       }
 
-      // Load group order from localStorage only when server has no persisted order
-      if (!persistedGroupOrder || persistedGroupOrder.length === 0) {
-        const saved = localStorage.getItem("check-cx-group-order");
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
-              setOrderedGroupNames(() => {
-                const currentSet = new Set(
-                  initialGroupedTimelines.map((group) => group.groupName)
-                );
-                // Filter out saved names that no longer exist, and add new ones
-                const validSaved = parsed.filter((name) => currentSet.has(name));
-                const newNames = initialGroupedTimelines
-                  .map((group) => group.groupName)
-                  .filter((name) => !validSaved.includes(name));
-                return [...validSaved, ...newNames];
-              });
-            }
-          } catch (e) {
-            console.error("Failed to parse group order", e);
+      const saved = localStorage.getItem("check-cx-group-order");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setOrderedGroupNames(() => {
+              const currentSet = new Set(initialGroupedTimelines.map((group) => group.groupName));
+              const validSaved = parsed.filter(name => currentSet.has(name));
+              const newNames = initialGroupedTimelines
+                .map((group) => group.groupName)
+                .filter(name => !validSaved.includes(name));
+              return [...validSaved, ...newNames];
+            });
           }
+        } catch (e) {
+          console.error("Failed to parse group order", e);
         }
       }
 
-      // Load selected tags
       const savedTags = localStorage.getItem("check-cx-selected-tags");
       if (savedTags) {
         try {
@@ -542,14 +379,10 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
           console.error("Failed to parse selected tags", e);
         }
       }
+    });
 
-      // Load view mode
-      const savedViewMode = localStorage.getItem("check-cx-view-mode");
-      if (savedViewMode && ["card", "list"].includes(savedViewMode)) {
-        setViewMode(savedViewMode as ViewMode);
-      }
-    }
-  }, [initialGroupedTimelines, persistedGroupOrder]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [initialGroupedTimelines]);
 
   // Save sort mode to localStorage when it changes
   useEffect(() => {
@@ -565,57 +398,25 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
     }
   }, [selectedTags]);
 
-  // Save view mode to localStorage when it changes
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("check-cx-view-mode", viewMode);
-    }
-  }, [viewMode]);
-
   // Sync when data updates (e.g. polling adds/removes groups)
   useEffect(() => {
-    setOrderedGroupNames(prev => {
-      const currentNames = groupedNames;
-      const currentSet = new Set(currentNames);
+    const frame = window.requestAnimationFrame(() => {
+      setOrderedGroupNames(prev => {
+        const currentNames = groupedNames;
+        const currentSet = new Set(currentNames);
+        const existingOrdered = prev.filter(name => currentSet.has(name));
+        const newGroups = currentNames.filter(name => !prev.includes(name));
 
-      // Keep existing order for groups that still exist
-      const existingOrdered = prev.filter(name => currentSet.has(name));
+        if (existingOrdered.length === prev.length && newGroups.length === 0 && existingOrdered.length === currentNames.length) {
+          return prev;
+        }
 
-      // Add any new groups that weren't in the previous order
-      const newGroups = currentNames.filter(name => !prev.includes(name));
-
-      // If nothing changed in terms of set membership, don't update state to avoid re-renders
-      if (existingOrdered.length === prev.length && newGroups.length === 0 && existingOrdered.length === currentNames.length) {
-        return prev;
-      }
-
-      return [...existingOrdered, ...newGroups];
-    });
-  }, [groupedNames]);
-
-  const handleGroupOpenChange = useCallback((groupName: string, open: boolean) => {
-    setOpenGroupNames((prev) => {
-      const next = new Set(prev);
-      if (open) next.add(groupName);
-      else next.delete(groupName);
-      return next;
-    });
-  }, []);
-
-  const persistGroupOrderToDb = useCallback(async (order: string[]) => {
-    try {
-      const res = await fetch("/api/admin/dashboard-order", {
-        method: "PUT",
-        redirect: "manual",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({groupOrder: order}),
+        return [...existingOrdered, ...newGroups];
       });
-      // 非管理员/未登录：忽略（仍保留 localStorage 行为）
-      if (!res.ok) return;
-    } catch {
-      // 静默失败，避免影响拖拽体验
-    }
-  }, []);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [groupedNames]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const {active, over} = event;
@@ -630,13 +431,11 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
         if (typeof window !== "undefined") {
           localStorage.setItem("check-cx-group-order", JSON.stringify(newOrder));
         }
-
-        void persistGroupOrderToDb(newOrder);
         
         return newOrder;
       });
     }
-  }, [persistGroupOrderToDb]);
+  }, []);
 
   const refresh = useCallback(
     async (
@@ -665,11 +464,14 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
   }, [selectedPeriod]);
 
   useEffect(() => {
-    setData(initialData);
-    // 将服务端数据放入前端缓存
-    if (initialData.trendPeriod) {
-      setCache(initialData.trendPeriod, initialData);
-    }
+    const frame = window.requestAnimationFrame(() => {
+      setData(initialData);
+      if (initialData.trendPeriod) {
+        setCache(initialData.trendPeriod, initialData);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [initialData]);
 
   useEffect(() => {
@@ -689,26 +491,6 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
   }, [data.trendPeriod, groupedTimelines]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const media = window.matchMedia("(pointer: coarse)");
-    const updatePointerType = () => {
-      const hasTouch = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
-      setIsCoarsePointer(media.matches || hasTouch);
-    };
-    updatePointerType();
-    media.addEventListener("change", updatePointerType);
-    return () => media.removeEventListener("change", updatePointerType);
-  }, []);
-
-  useEffect(() => {
-    if (!isCoarsePointer) {
-      setActiveOfficialCardId(null);
-    }
-  }, [isCoarsePointer]);
-
-  useEffect(() => {
     if (!data.pollIntervalMs || data.pollIntervalMs <= 0) {
       return;
     }
@@ -722,22 +504,32 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
     if (selectedPeriod === data.trendPeriod) {
       return;
     }
-    refresh(selectedPeriod).catch(() => undefined);
+    const frame = window.requestAnimationFrame(() => {
+      refresh(selectedPeriod).catch(() => undefined);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [data.trendPeriod, refresh, selectedPeriod]);
 
   useEffect(() => {
     if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || latestCheckTimestamp === null) {
-      setTimeToNextRefresh(null);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setTimeToNextRefresh(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
+
     const updateCountdown = () => {
       setTimeToNextRefresh(
         computeRemainingMs(data.pollIntervalMs, latestCheckTimestamp)
       );
     };
-    updateCountdown();
+    const frame = window.requestAnimationFrame(updateCountdown);
     const countdownTimer = window.setInterval(updateCountdown, 1000);
-    return () => window.clearInterval(countdownTimer);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(countdownTimer);
+    };
   }, [data.pollIntervalMs, latestCheckTimestamp]);
 
   // 根据卡片数量决定宽屏列数
@@ -773,13 +565,17 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
 
   // Sync selected tags when data updates (remove tags that no longer exist)
   useEffect(() => {
-    setSelectedTags(prev => {
-      const validTags = prev.filter(tag => allTags.includes(tag));
-      if (validTags.length === prev.length) {
-        return prev;
-      }
-      return validTags;
+    const frame = window.requestAnimationFrame(() => {
+      setSelectedTags(prev => {
+        const validTags = prev.filter(tag => allTags.includes(tag));
+        if (validTags.length === prev.length) {
+          return prev;
+        }
+        return validTags;
+      });
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [allTags]);
 
   // Filter and sort groups based on search query and sort mode
@@ -789,24 +585,14 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
         ? orderedGroupNames
         : groupedNames;
 
-    // Filter by search query (支持分组名称和 Provider 多个维度)
+    // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase().trim();
-      const filteredGroups: typeof groupedTimelineMap = new Map();
-
-      for (const groupName of result) {
+      result = result.filter((groupName) => {
         const group = groupedTimelineMap.get(groupName);
-        if (!group) continue;
-
-        const filtered = filterProvidersInGroup(group, query);
-        if (filtered) {
-          filteredGroups.set(groupName, filtered);
-        }
-      }
-
-      // 更新 groupedTimelineMap 为过滤后的版本
-      Object.assign(groupedTimelineMap, filteredGroups);
-      result = Array.from(filteredGroups.keys());
+        if (!group) return false;
+        return group.displayName.toLowerCase().includes(query);
+      });
     }
 
     // Filter by selected tags
@@ -857,35 +643,13 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
     return result;
   }, [groupedNames, groupedTimelineMap, orderedGroupNames, searchQuery, selectedTags, sortMode]);
 
-  // 搜索从无到有时：自动展开当前筛选结果（保留原“搜索时自动展开”语义）
-  useEffect(() => {
-    const active = Boolean(searchQuery.trim());
-    if (!prevSearchActiveRef.current && active) {
-      setOpenGroupNames((prev) => {
-        const next = new Set(prev);
-        for (const name of filteredGroupNames) {
-          next.add(name);
-        }
-        return next;
-      });
-    }
-    prevSearchActiveRef.current = active;
-  }, [filteredGroupNames, searchQuery]);
-
-  const setAllGroupsOpen = useCallback(
-    (open: boolean) => {
-      setOpenGroupNames(() => (open ? new Set(filteredGroupNames) : new Set()));
-    },
-    [filteredGroupNames]
-  );
-
   const groupedPanels = filteredGroupNames.length === 0 ? (
-    <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-border/50 bg-muted/20 py-20 text-center">
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-center">
       <div className="mb-4 rounded-full bg-muted/50 p-4">
         <Search className="h-8 w-8 text-muted-foreground" />
       </div>
-      <h3 className="text-lg font-semibold">没有找到匹配的结果</h3>
-      <p className="text-muted-foreground">尝试搜索分组名称、Provider 名称、类型或状态</p>
+      <h3 className="text-lg font-semibold">没有找到匹配的分组</h3>
+      <p className="text-muted-foreground">尝试使用其他关键词或标签筛选</p>
       {(searchQuery || selectedTags.length > 0) && (
         <button
           type="button"
@@ -893,30 +657,24 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
             setSearchQuery("");
             setSelectedTags([]);
           }}
-          className="mt-4 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+          className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           清除筛选
         </button>
       )}
     </div>
   ) : (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {filteredGroupNames.map((groupName) => {
         const group = groupedTimelineMap.get(groupName);
         if (!group) return null;
-        const isOpen = openGroupNames.has(groupName);
         const commonProps = {
           group,
           timeToNextRefresh,
-          isCoarsePointer,
-          activeOfficialCardId,
-          setActiveOfficialCardId,
           gridColsClass,
           availabilityStats,
           selectedPeriod,
-          viewMode,
-          isOpen,
-          onOpenChange: (open: boolean) => handleGroupOpenChange(groupName, open),
+          defaultOpen: false,
         };
         // Only enable drag-and-drop in custom sort mode
         return isDndReady && sortMode === "custom" ? (
@@ -934,263 +692,174 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
 
   return (
     <div className="relative">
-       {/* Corner decorative markers for the main container */}
-       <CornerPlus className="fixed left-4 top-4 h-6 w-6 text-border md:left-8 md:top-8" />
-       <CornerPlus className="fixed right-4 top-4 h-6 w-6 text-border md:right-8 md:top-8" />
-       <CornerPlus className="fixed bottom-4 left-4 h-6 w-6 text-border md:bottom-8 md:left-8" />
-       <CornerPlus className="fixed bottom-4 right-4 h-6 w-6 text-border md:bottom-8 md:right-8" />
-
-      <header className="relative z-10 mb-6 flex flex-col justify-between gap-4 sm:mb-8 sm:gap-6 lg:flex-row lg:items-end">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-lg bg-foreground text-background sm:h-8 sm:w-8">
-              {siteLogoUrl ? (
-                <span
-                  role="img"
-                  aria-label={siteTitle}
-                  className="h-full w-full bg-cover bg-center bg-no-repeat"
-                  style={{ backgroundImage: `url(${siteLogoUrl})` }}
-                />
-              ) : (
-                <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              )}
-            </div>
-            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground sm:text-sm">
-              System Status
+      <header className="mb-6 space-y-4 sm:mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div className="flex w-full items-center gap-3 sm:w-auto">
+            <Image
+              src="/favicon.png"
+              alt="Check CX"
+              width={32}
+              height={32}
+              priority
+              className="h-8 w-8 shrink-0 rounded-lg object-contain"
+            />
+            <h1 className="text-xl font-semibold tracking-tight">Check CX</h1>
+            <span className="hidden text-sm text-muted-foreground sm:inline">
+              AI 模型接口健康监控
             </span>
-            <div className="h-3 w-[1px] bg-border/60 sm:h-4" />
-            {siteConfig?.githubUrl && (
-              <>
-                <Link
-                  href={siteConfig.githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:text-xs"
-                >
-                  <Github className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                  <span>GitHub</span>
-                </Link>
-                <div className="h-3 w-[1px] bg-border/60 sm:h-4" />
-              </>
-            )}
-            <ThemeToggle />
-            <div className="h-3 w-[1px] bg-border/60 sm:h-4" />
             <Link
-              href="/admin"
-              className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:text-xs"
+              href="https://linux.do"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground sm:ml-0"
             >
-              <Settings className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-              <span>Admin</span>
+              <ArrowLeft className="h-3 w-3" />
+              Linux.do
             </Link>
+            <Link
+              href="https://github.com/BingZi-233/check-cx"
+              target="_blank"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Github className="h-4 w-4" />
+            </Link>
+            <ThemeToggle />
           </div>
-          
-          <h1 className="max-w-2xl text-2xl font-extrabold leading-tight tracking-tight sm:text-4xl md:text-5xl">
-            {siteTitle}
-          </h1>
-          
-          <div className="flex max-w-lg flex-col gap-1.5 text-sm text-muted-foreground sm:text-base">
-             <p className="leading-relaxed">{siteDescription}</p>
-          </div>
-        </div>
 
-        <div className="flex flex-col items-start gap-3 sm:gap-4 lg:items-end">
-           {/* Search Box - only show when multiple groups exist */}
-           {hasMultipleGroups && (
-             <div className="relative w-full sm:w-60">
-               <input
-                 type="text"
-                 placeholder="搜索分组或 Provider（名称、类型、状态）..."
-                 value={searchQuery}
-                 onChange={(e) => setSearchQuery(e.target.value)}
-                 className="h-9 w-full rounded-full border border-border/60 bg-background/50 pl-10 pr-10 text-sm backdrop-blur-sm transition-colors placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20"
-               />
-               <Search
-                 aria-hidden="true"
-                 className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-               />
-               {searchQuery && (
-                 <button
-                   type="button"
-                   onClick={() => setSearchQuery("")}
-                   className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                 >
-                   <X className="h-4 w-4" />
-                 </button>
-               )}
-             </div>
-           )}
-
-           {/* Tag Filter - only show when multiple groups and tags exist */}
-           {hasMultipleGroups && allTags.length > 0 && (
-             <div className="flex flex-wrap items-center gap-2">
-               {allTags.map((tag) => {
-                 const isSelected = selectedTags.includes(tag);
-                 return (
-                   <button
-                     key={tag}
-                     type="button"
-                     onClick={() => toggleTag(tag)}
-                     className={cn(
-                       "rounded-full px-3 py-1 text-xs font-semibold transition-all",
-                       isSelected
-                         ? cn(getTagColorClass(tag), "ring-2 ring-foreground/20")
-                         : "bg-muted/50 text-muted-foreground hover:bg-muted"
-                     )}
-                   >
-                     {tag}
-                   </button>
-                 );
-               })}
-               {selectedTags.length > 0 && (
-                 <button
-                   type="button"
-                   onClick={() => setSelectedTags([])}
-                   className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                 >
-                   <X className="h-3 w-3" />
-                   清除
-                 </button>
-               )}
-             </div>
-           )}
-
-           {/* Sort Mode Selector */}
-           {hasMultipleGroups && (
-             <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-               <span className="pl-1">排序</span>
-               <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-                 {SORT_OPTIONS.map((option) => (
-                   <button
-                     key={option.value}
-                     type="button"
-                     onClick={() => setSortMode(option.value)}
-                     className={cn(
-                       "rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                       sortMode === option.value
-                         ? "bg-foreground text-background"
-                         : "text-muted-foreground hover:text-foreground"
-                     )}
-                   >
-                     {option.label}
-                   </button>
-                 ))}
-               </div>
-             </div>
-          )}
-
-           {/* View Mode Selector */}
-           <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-             <span className="pl-1">视图</span>
-             <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-               <button
-                 type="button"
-                 onClick={() => setViewMode("card")}
-                 className={cn(
-                   "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                   viewMode === "card"
-                     ? "bg-foreground text-background"
-                     : "text-muted-foreground hover:text-foreground"
-                 )}
-               >
-                 <LayoutGrid className="h-3 w-3" />
-                 卡片
-               </button>
-               <button
-                 type="button"
-                 onClick={() => setViewMode("list")}
-                 className={cn(
-                   "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                   viewMode === "list"
-                     ? "bg-foreground text-background"
-                     : "text-muted-foreground hover:text-foreground"
-                 )}
-               >
-                 <List className="h-3 w-3" />
-                 列表
-               </button>
-             </div>
-           </div>
-
-           {/* Expand/Collapse All */}
-           {hasMultipleGroups && (
-             <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-               <span className="pl-1">分组</span>
-               <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-                 <button
-                   type="button"
-                   onClick={() => setAllGroupsOpen(true)}
-                   className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-                 >
-                   展开
-                 </button>
-                 <button
-                   type="button"
-                   onClick={() => setAllGroupsOpen(false)}
-                   className="rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-                 >
-                   折叠
-                 </button>
-               </div>
-             </div>
-           )}
-
-           <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-             <span className="pl-1">可用性区间</span>
-             <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-               {PERIOD_OPTIONS.map((option) => (
-                 <button
-                   key={option.value}
-                   type="button"
-                   onClick={() => setSelectedPeriod(option.value)}
-                   className={cn(
-                     "rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                     selectedPeriod === option.value
-                       ? "bg-foreground text-background"
-                       : "text-muted-foreground hover:text-foreground"
-                   )}
-                 >
-                   {option.label}
-                 </button>
-               ))}
-             </div>
-           </div>
-
-           {/* Status Pill */}
-           <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-4 py-1.5 backdrop-blur-sm">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
+          <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">
+            <div className="flex shrink-0 items-center gap-2 rounded-full border px-3 py-1">
+              <span className="relative flex h-2 w-2">
+                <span className={cn("absolute inline-flex h-full w-full animate-ping rounded-full opacity-75", STATUS_META.operational.dot)} />
+                <span className={cn("relative inline-flex h-2 w-2 rounded-full", STATUS_META.operational.dot)} />
               </span>
-              <span className="text-xs font-semibold uppercase tracking-wider">Operational</span>
-           </div>
-
-           {lastUpdated && (
-             <div className="flex items-center gap-3 text-xs font-medium text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <RefreshCcw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
-                  <span>更新于 <ClientTime value={lastUpdated} /></span>
-                </div>
-                <span className="opacity-30">|</span>
-                <span>{pollIntervalLabel} 轮询</span>
+              <span className="text-xs font-medium">Operational</span>
+            </div>
+            {lastUpdated && (
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-xs text-muted-foreground sm:flex-none">
+                <RefreshCcw className={cn("h-3 w-3 shrink-0", isRefreshing && "animate-spin")} />
+                <span className="truncate">
+                  <span className="whitespace-nowrap">更新于 <ClientTime value={lastUpdated} /></span>
+                  <span className="mx-1.5 opacity-30">|</span>
+                  <span className="whitespace-nowrap">{pollIntervalLabel} 轮询</span>
+                </span>
                 <button
                   type="button"
                   onClick={() => refresh(selectedPeriod, true)}
                   disabled={isRefreshing}
                   className={cn(
-                    "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
+                    "ml-auto shrink-0 rounded-lg border px-2.5 py-1 font-medium transition-colors hover:border-foreground/20 hover:text-foreground sm:ml-0",
                     isRefreshing && "cursor-not-allowed opacity-60"
                   )}
                 >
                   刷新
                 </button>
-             </div>
-           )}
+              </div>
+            )}
+          </div>
         </div>
+
+        {hasMultipleGroups && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2">
+            <div className="relative w-full sm:w-56">
+              <input
+                type="text"
+                placeholder="搜索分组..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 w-full rounded-md border bg-background pl-8 pr-8 text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring/30"
+              />
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {allTags.map((tag) => {
+                  const isSelected = selectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleTag(tag)}
+                      className={cn(
+                        "rounded-full px-2.5 py-0.5 text-xs font-semibold transition-all",
+                        isSelected
+                          ? cn(getTagColorClass(tag), "ring-2 ring-foreground/20")
+                          : "bg-muted text-muted-foreground hover:bg-muted/70"
+                      )}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+                {selectedTags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTags([])}
+                    className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                    清除
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
+              <div className="flex flex-1 items-center gap-1 rounded-md border bg-background p-0.5 text-xs sm:flex-none">
+                {SORT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSortMode(option.value)}
+                    className={cn(
+                      "flex-1 whitespace-nowrap rounded px-2 py-1 font-medium transition-colors sm:flex-none",
+                      sortMode === option.value
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-1 items-center gap-1 rounded-md border bg-background p-0.5 text-xs sm:flex-none">
+                {PERIOD_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSelectedPeriod(option.value)}
+                    className={cn(
+                      "flex-1 whitespace-nowrap rounded px-2 py-1 font-medium transition-colors sm:flex-none",
+                      selectedPeriod === option.value
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="relative z-10 min-h-[50vh]">
         {total === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-border/50 bg-muted/20 py-20 text-center">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-center">
             <div className="mb-4 rounded-full bg-muted/50 p-4">
               <Activity className="h-8 w-8 text-muted-foreground" />
             </div>
@@ -1215,34 +884,17 @@ export function DashboardView({ initialData, siteConfig }: DashboardViewProps) {
             groupedPanels
           )
         ) : (
-          viewMode === "list" ? (
-            <div className="space-y-2">
-              {providerTimelines.map((timeline) => (
-                <ProviderListItem
-                  key={timeline.id}
-                  timeline={timeline}
-                  timeToNextRefresh={timeToNextRefresh}
-                  availabilityStats={availabilityStats[timeline.id]}
-                  selectedPeriod={selectedPeriod}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className={`grid gap-4 ${gridColsClass}`}>
-              {providerTimelines.map((timeline) => (
-                <ProviderCard
-                  key={timeline.id}
-                  timeline={timeline}
-                  timeToNextRefresh={timeToNextRefresh}
-                  isCoarsePointer={isCoarsePointer}
-                  activeOfficialCardId={activeOfficialCardId}
-                  setActiveOfficialCardId={setActiveOfficialCardId}
-                  availabilityStats={availabilityStats[timeline.id]}
-                  selectedPeriod={selectedPeriod}
-                />
-              ))}
-            </div>
-          )
+          <div className={`grid gap-4 ${gridColsClass}`}>
+            {providerTimelines.map((timeline) => (
+              <ProviderCard
+                key={timeline.id}
+                timeline={timeline}
+                timeToNextRefresh={timeToNextRefresh}
+                availabilityStats={availabilityStats[timeline.id]}
+                selectedPeriod={selectedPeriod}
+              />
+            ))}
+          </div>
         )}
       </main>
     </div>

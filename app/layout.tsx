@@ -1,89 +1,28 @@
 import type {Metadata} from "next";
-import {Geist, Geist_Mono} from "next/font/google";
+import {JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import "@/lib/core/poller";
 import NextTopLoader from "nextjs-toploader";
 import {ThemeProvider} from "@/components/theme-provider";
 import {NotificationBanner} from "@/components/notification-banner";
-import {getSiteSeoConfig, toAbsoluteUrl} from "@/lib/core/site-seo";
+import {SiteConfigHydrator} from "@/components/site-config-hydrator";
+const jetbrainsMono = JetBrains_Mono({subsets:['latin'],variable:'--font-mono'});
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const DEFAULT_TITLE = "Check CX - AI 模型健康监控";
+const DEFAULT_DESCRIPTION = "实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟";
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export async function generateMetadata(): Promise<Metadata> {
-  const {title, description, faviconUrl, logoUrl, keywords, siteUrl} = await getSiteSeoConfig();
-  const canonical = toAbsoluteUrl("/", siteUrl);
-  const ogImageSource = logoUrl || faviconUrl;
-  const ogImage = toAbsoluteUrl(ogImageSource, siteUrl) ?? ogImageSource;
-
-  return {
-    metadataBase: siteUrl ? new URL(siteUrl) : undefined,
-    title: {
-      default: title,
-      template: `%s | ${title}`,
-    },
-    description,
-    keywords,
-    alternates: {
-      canonical: canonical ?? "/",
-      types: {
-        "application/rss+xml": canonical ? canonical.replace(/\/$/, "") + "/rss.xml" : "/rss.xml",
-      },
-    },
-    openGraph: {
-      type: "website",
-      url: canonical ?? undefined,
-      title,
-      description,
-      siteName: title,
-      images: ogImage ? [{url: ogImage}] : undefined,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-      images: ogImage ? [ogImage] : undefined,
-    },
-    icons: {
-      icon: faviconUrl,
-    },
-  };
-}
+export const metadata: Metadata = {
+  title: DEFAULT_TITLE,
+  description: DEFAULT_DESCRIPTION,
+  icons: { icon: "/favicon.png" },
+  openGraph: { title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION },
+};
 
 const themeBootScript = `(()=>{
+  const hour = new Date().getHours();
+  const isDark = hour >= 19 || hour < 7;
   const root = document.documentElement;
-  let inIframe = false;
-  try { inIframe = window.self !== window.top; } catch(e) { inIframe = true; }
-  let theme = 'light';
-
-  try {
-    const saved = localStorage.getItem('theme');
-    if (saved === 'light' || saved === 'dark') {
-      theme = saved;
-    }
-  } catch(e) {}
-
-  if (inIframe) {
-    theme = 'light';
-  }
-
-  const isDark = theme === 'dark';
-
-  root.classList.toggle('in-iframe', inIframe);
   root.classList.toggle('dark', isDark);
   root.style.colorScheme = isDark ? 'dark' : 'light';
-
-  // iframe 场景：强制亮色，并锁定 next-themes 的持久化值，避免被用户/系统偏好覆盖
-  if (inIframe) {
-    try { localStorage.setItem('theme', 'light'); } catch(e) {}
-  }
 })();`;
 
 export default function RootLayout({
@@ -92,21 +31,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning className={jetbrainsMono.variable}>
       <head>
         <script
           id="theme-boot"
           dangerouslySetInnerHTML={{ __html: themeBootScript }}
         />
       </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className="antialiased">
         <NextTopLoader color="var(--foreground)" showSpinner={false} />
+        <SiteConfigHydrator />
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
-          enableSystem={false}
+          defaultTheme="system"
+          enableSystem
           disableTransitionOnChange
         >
           <NotificationBanner />

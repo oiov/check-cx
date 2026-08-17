@@ -1,43 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireAuth } from "../../../alerts/_auth";
-import { createAdminClient } from "@/lib/supabase/admin";
-import type { ProviderConfig, ProviderType } from "@/lib/types";
+
+import { getAdminClaims } from "@/lib/admin/auth";
 import { runChecksForConfigs } from "@/lib/core/config-check-execution";
+import { loadProviderConfigsFromDB } from "@/lib/database/config-loader";
 
-export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const err = await requireAuth();
-  if (err) return err;
+interface Context { params: Promise<{ id: string }> }
 
-  const { id } = await params;
-  const admin = createAdminClient();
-
-  const { data, error } = await admin
-    .from("check_configs")
-    .select("id,name,type,model,endpoint,api_key,is_maintenance,request_header,metadata,group_name")
-    .eq("id", id)
-    .single();
-
-  if (error || !data) return NextResponse.json({ error: "配置不存在" }, { status: 404 });
-
-  const config: ProviderConfig = {
-    id: data.id,
-    name: data.name,
-    type: data.type as ProviderType,
-    endpoint: data.endpoint,
-    model: data.model,
-    apiKey: data.api_key,
-    is_maintenance: data.is_maintenance,
-    requestHeaders: (data.request_header as Record<string, string>) || null,
-    metadata: (data.metadata as Record<string, unknown>) || null,
-    groupName: data.group_name || null,
-  };
-
+export async function POST(_: NextRequest, context: Context) {
+  if (!(await getAdminClaims())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { id } = await context.params;
+  const config = (await loadProviderConfigsFromDB({ forceRefresh: true })).find((item) => item.id === id);
+  if (!config) return NextResponse.json({ error: "配置不存在" }, { status: 404 });
   const [result] = await runChecksForConfigs([config]);
-
-  return NextResponse.json({
-    status: result.status,
-    latencyMs: result.latencyMs,
-    pingLatencyMs: result.pingLatencyMs,
-    message: result.message ?? null,
-  });
+  return NextResponse.json(result);
 }

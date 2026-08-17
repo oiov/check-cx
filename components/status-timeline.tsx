@@ -7,7 +7,7 @@ import {Badge} from "@/components/ui/badge";
 import {ClientTime} from "@/components/client-time";
 import {STATUS_META} from "@/lib/core/status";
 import type {TimelineItem} from "@/lib/types";
-import {cn} from "@/lib/utils";
+import {cn, toDisplayErrorMessage} from "@/lib/utils";
 
 interface StatusTimelineProps {
   /** 时间线条目列表，通常为最近 60 条按时间倒序的检测结果 */
@@ -16,8 +16,6 @@ interface StatusTimelineProps {
   nextRefreshInMs?: number | null;
   /** 是否处于维护模式 */
   isMaintenance?: boolean;
-  /** 紧凑模式：用于列表视图减少占用高度 */
-  density?: "normal" | "compact";
 }
 
 /** 时间线最多绘制的片段数量 */
@@ -36,12 +34,7 @@ const formatRemainingTime = (ms: number) => {
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
 
-export function StatusTimeline({
-  items,
-  nextRefreshInMs,
-  isMaintenance,
-  density = "normal",
-}: StatusTimelineProps) {
+export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: StatusTimelineProps) {
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
 
@@ -71,7 +64,12 @@ export function StatusTimeline({
   if (items.length === 0) {
     if (isMaintenance) {
       return (
-        <div className="flex items-center justify-center rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 p-4 text-xs text-blue-500">
+        <div
+          className={cn(
+            "flex items-center justify-center rounded-lg border border-dashed p-4 text-xs",
+            STATUS_META.maintenance.badgeClass
+          )}
+        >
           维护中 · 已暂停时间线采集
         </div>
       );
@@ -89,31 +87,19 @@ export function StatusTimeline({
   const segmentCount = Math.min(items.length, SEGMENT_LIMIT);
   const nextRefreshLabel =
     typeof nextRefreshInMs === "number" ? formatRemainingTime(nextRefreshInMs) : null;
-  const isCompact = density === "compact";
 
   return (
-    <div className={cn(isCompact ? "space-y-1.5" : "space-y-2")}>
+    <div className="space-y-3">
       {/* Header / Legend */}
-      <div
-        className={cn(
-          "flex items-center justify-between font-medium uppercase tracking-wider text-muted-foreground",
-          isCompact ? "text-[9px]" : "text-[10px]"
-        )}
-      >
+      <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span>
-            {isCompact
-              ? "History"
-              : segmentCount <= 1
-                ? "History (latest)"
-                : `History (${segmentCount}pts)`}
-          </span>
+          <span>{segmentCount <= 1 ? "History (latest)" : `History (${segmentCount}pts)`}</span>
         </div>
         <div className="flex items-center gap-2">
            {nextRefreshLabel ? (
              <span className="flex items-center gap-1.5 text-primary">
-               <Clock className={cn(isCompact ? "h-2.5 w-2.5" : "h-3 w-3")} />
-               {isCompact ? nextRefreshLabel : `Next update in ${nextRefreshLabel}`}
+               <Clock className="h-3 w-3" />
+               Next update in {nextRefreshLabel}
              </span>
            ) : (
              <span className="opacity-50">Manual Refresh</span>
@@ -122,12 +108,7 @@ export function StatusTimeline({
       </div>
 
       {/* Timeline Bar */}
-      <div
-        className={cn(
-          "relative w-full overflow-hidden rounded-sm bg-muted/20",
-          isCompact ? "h-6" : "h-7"
-        )}
-      >
+      <div className="relative h-8 w-full overflow-hidden rounded-sm bg-muted/20">
         <div className="flex h-full w-full flex-row-reverse gap-[2px] p-[2px]">
           {segments.map((segment, index) => {
             if (!segment) {
@@ -150,7 +131,12 @@ export function StatusTimeline({
                 open={isOpen}
                 openDelay={isCoarsePointer ? 0 : 100}
                 onOpenChange={(nextOpen) =>
-                  setActiveSegmentKey(nextOpen ? segmentKey : null)
+                  setActiveSegmentKey((current) => {
+                    if (nextOpen) {
+                      return segmentKey;
+                    }
+                    return current === segmentKey ? null : current;
+                  })
                 }
               >
                 <HoverCardTrigger asChild>
@@ -172,10 +158,10 @@ export function StatusTimeline({
                 </HoverCardTrigger>
                 <HoverCardContent
                   side="top"
-                  className="w-64 space-y-3 rounded-xl border-border/50 bg-background/95 p-4 shadow-xl backdrop-blur-xl"
+                  className="w-64 space-y-3 rounded-xl border-border/50 bg-popover p-4 shadow-xl"
                 >
                    <div className="flex items-center justify-between border-b border-border/50 pb-2">
-                      <Badge variant={preset.badge} className="h-5 px-1.5 text-[10px]">{preset.label}</Badge>
+                      <Badge className={cn("h-5 px-1.5 text-[10px]", preset.badgeClass)}>{preset.label}</Badge>
                       <ClientTime value={segment.checkedAt} className="font-mono text-[10px] text-muted-foreground" />
                    </div>
                    
@@ -192,7 +178,7 @@ export function StatusTimeline({
                    
                    {segment.message && (
                      <div className="rounded bg-muted/30 p-2 text-[10px] text-muted-foreground break-words">
-                       {segment.message}
+                       {toDisplayErrorMessage(segment.message) || segment.message}
                      </div>
                    )}
                 </HoverCardContent>
@@ -203,12 +189,10 @@ export function StatusTimeline({
       </div>
       
       {/* Axis labels */}
-      {isCompact ? null : (
-        <div className="flex justify-between text-[8px] font-medium uppercase tracking-widest text-muted-foreground/50">
-          <span>Past</span>
-          <span>Now</span>
-        </div>
-      )}
+      <div className="flex justify-between text-[9px] font-medium uppercase tracking-widest text-muted-foreground/50">
+        <span>Past</span>
+        <span>Now</span>
+      </div>
     </div>
   );
 }

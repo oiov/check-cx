@@ -5,45 +5,53 @@ export const STATUS_META: Record<
   {
     label: string;
     description: string;
-    badge: "success" | "warning" | "danger" | "secondary";
+    /** 完整 tinted-badge class，直接传给 Badge 的 className */
+    badgeClass: string;
+    /** 状态圆点/时间线段背景色 */
     dot: string;
   }
 > = {
   operational: {
     label: "正常",
     description: "请求响应如常",
-    badge: "success",
+    badgeClass:
+      "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
     dot: "bg-emerald-500",
   },
   degraded: {
     label: "延迟",
     description: "响应成功但耗时升高",
-    badge: "warning",
+    badgeClass:
+      "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
     dot: "bg-amber-500",
   },
   failed: {
     label: "异常",
     description: "请求失败或超时",
-    badge: "danger",
-    dot: "bg-rose-500",
+    badgeClass:
+      "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400",
+    dot: "bg-red-500",
   },
   validation_failed: {
     label: "验证失败",
     description: "请求成功但回答未通过验证",
-    badge: "warning",
+    badgeClass:
+      "border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-400",
     dot: "bg-orange-500",
   },
   maintenance: {
     label: "维护中",
     description: "人工维护,已停止检查",
-    badge: "secondary",
+    badgeClass:
+      "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400",
     dot: "bg-blue-500",
   },
   error: {
     label: "错误",
     description: "请求异常（网络错误、API报错、连接失败）",
-    badge: "danger",
-    dot: "bg-red-600",
+    badgeClass:
+      "border-rose-600/30 bg-rose-600/10 text-rose-700 dark:text-rose-400",
+    dot: "bg-rose-600",
   },
 };
 
@@ -52,28 +60,32 @@ export const OFFICIAL_STATUS_META: Record<
   {
     label: string;
     description: string;
-    color: string; // Tailwind 文本颜色类
+    bannerLabel?: string;
+    bannerBg?: string;
+    bannerBorder?: string;
   }
 > = {
   operational: {
     label: "正常",
     description: "官方服务正常运行",
-    color: "text-emerald-600",
   },
   degraded: {
     label: "降级",
     description: "官方服务性能降级",
-    color: "text-amber-600",
+    bannerLabel: "官方降级",
+    bannerBg: "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400",
+    bannerBorder: "border-amber-500/50",
   },
   down: {
     label: "故障",
     description: "官方服务出现故障",
-    color: "text-rose-600",
+    bannerLabel: "官方故障",
+    bannerBg: "bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400",
+    bannerBorder: "border-rose-500/50",
   },
   unknown: {
     label: "未知",
     description: "无法获取官方状态",
-    color: "text-gray-500",
   },
 };
 
@@ -81,5 +93,4 @@ export const PROVIDER_LABEL: Record<ProviderType, string> = {
   openai: "OpenAI",
   gemini: "Gemini",
   anthropic: "Anthropic",
-  grok: "Grok",
 };

@@ -32,13 +32,6 @@ export async function checkOfficialStatus(
     case "anthropic":
       return checkAnthropicStatus();
 
-    case "grok":
-      return {
-        status: "unknown",
-        message: "未配置官方状态检查",
-        checkedAt,
-      };
-
     default:
       return {
         status: "unknown",

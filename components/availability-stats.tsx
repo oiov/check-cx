@@ -1,5 +1,6 @@
 "use client";
 
+import {STATUS_META} from "@/lib/core/status";
 import type {AvailabilityPeriod, AvailabilityStat} from "@/lib/types";
 import {cn} from "@/lib/utils";
 
@@ -15,14 +16,17 @@ const PERIOD_LABELS: Record<AvailabilityPeriod, string> = {
   "30d": "30 天",
 };
 
-function getAvailabilityColorStyle(pct: number | null | undefined) {
+function getAvailabilityColorClass(pct: number | null | undefined) {
   if (pct === null || pct === undefined) {
-    return undefined;
+    return "text-muted-foreground";
   }
-  const clamped = Math.max(0, Math.min(100, pct));
-  // 0 -> red, 100 -> green
-  const hue = (clamped / 100) * 120;
-  return { color: `hsl(${hue} 80% 45%)` };
+  if (pct >= 99) {
+    return "text-emerald-600 dark:text-emerald-400";
+  }
+  if (pct >= 95) {
+    return "text-amber-600 dark:text-amber-400";
+  }
+  return "text-red-600 dark:text-red-400";
 }
 
 export function AvailabilityStats({ stats, period, isMaintenance }: AvailabilityStatsProps) {
@@ -30,21 +34,27 @@ export function AvailabilityStats({ stats, period, isMaintenance }: Availability
   const pct = current?.availabilityPct ?? null;
   const pctLabel = pct === null ? "—" : `${pct.toFixed(2)}%`;
 
-  // 维护模式下的特殊展示
+  // 维护模式下的特殊展示：色板只读 STATUS_META.maintenance
   if (isMaintenance) {
+    const meta = STATUS_META.maintenance;
     return (
-      <div className="flex items-center justify-between rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-3 py-2">
+      <div
+        className={cn(
+          "flex items-center justify-between rounded-lg border border-dashed px-3 py-2",
+          meta.badgeClass
+        )}
+      >
         <div className="space-y-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-500">
+          <p className="text-[10px] font-semibold uppercase tracking-wider">
             可用性 ({PERIOD_LABELS[period]})
           </p>
-          <p className="text-[10px] text-blue-500/70">
+          <p className="text-[10px] opacity-70">
             {current
               ? `维护前 ${current.operationalCount}/${current.totalChecks} 成功`
               : "维护中 · 已暂停统计"}
           </p>
         </div>
-        <span className="font-mono text-sm font-bold text-blue-500">
+        <span className="font-mono text-sm font-bold">
           {pctLabel}
         </span>
       </div>
@@ -63,13 +73,7 @@ export function AvailabilityStats({ stats, period, isMaintenance }: Availability
             : "暂无数据"}
         </p>
       </div>
-      <span
-        className={cn(
-          "font-mono text-sm font-bold",
-          pct === null ? "text-muted-foreground" : ""
-        )}
-        style={getAvailabilityColorStyle(pct)}
-      >
+      <span className={cn("font-mono text-sm font-bold", getAvailabilityColorClass(pct))}>
         {pctLabel}
       </span>
     </div>

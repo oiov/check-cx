@@ -13,8 +13,6 @@
 # testing
 /coverage
 
-/triggers
-
 # next.js
 /.next/
 /out/
@@ -51,6 +49,11 @@ error.log
 
 .playwright-mcp
 .mcp.json
+
+# local agent workspaces
+.worktrees/
+.superpowers/
+/triggers/
 
 # openspec
 openspec/changes/*

@@ -4,5 +4,6 @@
   "regions": ["hkg1"],
   "env": {
     "CHECK_POLL_INTERVAL_SECONDS": "60"
-  }
+  },
+  "crons": []
 }

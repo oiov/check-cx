@@ -4,8 +4,6 @@ import { loadProviderConfigsFromDB } from "@/lib/database/config-loader";
 import { getPollingIntervalMs, getPollingIntervalLabel } from "@/lib/core/polling-config";
 import type { CheckResult, HealthStatus } from "@/lib/types";
 
-export const revalidate = 0;
-export const dynamic = "force-dynamic";
 
 interface ProviderStatistics {
   totalChecks: number;
@@ -65,6 +63,24 @@ interface ApiResponse {
       model: string | null;
     };
   };
+}
+
+interface StatusCacheEntry {
+  data?: ApiResponse;
+  etag?: string;
+  expiresAt: number;
+  inflight?: Promise<{ data: ApiResponse; etag: string }>;
+}
+
+/** 内存缓存：公开只读 API，避免外部轮询每次都打满数据库 */
+const statusCache = new Map<string, StatusCacheEntry>();
+
+function generateETag(data: string): string {
+  let hash = 5381;
+  for (let i = 0; i < data.length; i++) {
+    hash = ((hash << 5) + hash) ^ data.charCodeAt(i);
+  }
+  return `"${(hash >>> 0).toString(16)}"`;
 }
 
 function computeStatistics(items: CheckResult[]): ProviderStatistics {
@@ -134,11 +150,10 @@ function computeStatistics(items: CheckResult[]): ProviderStatistics {
   };
 }
 
-export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams;
-  const groupFilter = searchParams.get("group");
-  const modelFilter = searchParams.get("model");
-
+async function buildStatusResponse(
+  groupFilter: string | null,
+  modelFilter: string | null
+): Promise<ApiResponse> {
   const allConfigs = await loadProviderConfigsFromDB();
   const activeConfigs = allConfigs.filter((cfg) => !cfg.is_maintenance);
   const maintenanceConfigIds = new Set(
@@ -238,7 +253,7 @@ export async function GET(request: NextRequest) {
         : null,
   };
 
-  const response: ApiResponse = {
+  return {
     providers,
     summary,
     metadata: {
@@ -251,6 +266,61 @@ export async function GET(request: NextRequest) {
       },
     },
   };
+}
 
-  return NextResponse.json(response);
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const groupFilter = searchParams.get("group");
+  const modelFilter = searchParams.get("model");
+
+  const cacheKey = `v1:status:${groupFilter ?? ""}:${modelFilter ?? ""}`;
+  const ttlMs = getPollingIntervalMs();
+  const now = Date.now();
+
+  const loadData = async (): Promise<{ data: ApiResponse; etag: string }> => {
+    const data = await buildStatusResponse(groupFilter, modelFilter);
+    const etag = generateETag(JSON.stringify(data));
+    statusCache.set(cacheKey, {
+      data,
+      etag,
+      expiresAt: Date.now() + ttlMs,
+    });
+    return { data, etag };
+  };
+
+  let result: { data: ApiResponse; etag: string };
+  const cached = statusCache.get(cacheKey);
+  if (cached?.data && cached.etag && now < cached.expiresAt) {
+    result = { data: cached.data, etag: cached.etag };
+  } else if (cached?.inflight) {
+    result = await cached.inflight;
+  } else {
+    const inflight = loadData().finally(() => {
+      const entry = statusCache.get(cacheKey);
+      if (entry?.inflight === inflight) {
+        delete entry.inflight;
+      }
+    });
+    statusCache.set(cacheKey, {
+      data: cached?.data,
+      etag: cached?.etag,
+      expiresAt: cached?.expiresAt ?? 0,
+      inflight,
+    });
+    result = await inflight;
+  }
+
+  // 条件请求：数据未变返回 304
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (ifNoneMatch === result.etag) {
+    return new Response(null, {
+      status: 304,
+      headers: { ETag: result.etag },
+    });
+  }
+
+  const response = NextResponse.json(result.data);
+  response.headers.set("Cache-Control", "public, no-cache");
+  response.headers.set("ETag", result.etag);
+  return response;
 }

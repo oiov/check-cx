@@ -1,7 +1,19 @@
 /**
  * 数据库表类型定义
- * 对应 Supabase 的 check_configs 和 check_history 表
+ * 对应 Supabase 的模型、配置与历史表
  */
+
+/**
+ * check_models 表的行类型
+ */
+export interface CheckModelRow {
+  id: string;
+  type: string;
+  model: string;
+  template_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
 
 /**
  * check_configs 表的行类型
@@ -10,16 +22,32 @@ export interface CheckConfigRow {
   id: string;
   name: string;
   type: string;
-  model: string;
+  model_id: string;
+  model?: string;
+  template_id?: string | null;
   endpoint: string;
   api_key: string;
   enabled: boolean;
   is_maintenance: boolean;
+  group_name?: string | null;
   request_header?: Record<string, string> | null;
   metadata?: Record<string, unknown> | null;
-  group_name?: string | null;
   stream_mode?: "stream" | "generate" | null;
   created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * check_request_templates 表的行类型
+ */
+export interface CheckRequestTemplateRow {
+  id: string;
+  name: string;
+  type: string;
+  request_header?: Record<string, string> | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**
@@ -33,6 +61,21 @@ export interface CheckHistoryRow {
   ping_latency_ms: number | null;
   checked_at: string;
   message: string | null;
+}
+
+/**
+ * check_challenges 表的行类型
+ */
+export interface CheckChallengeRow {
+  id: string;
+  config_id: string;
+  difficulty: number;
+  category: string;
+  expected_answer: string;
+  response_excerpt: string | null;
+  passed: boolean;
+  latency_ms: number | null;
+  checked_at: string;
 }
 
 /**
@@ -69,48 +112,5 @@ export interface SystemNotificationRow {
   message: string;
   is_active: boolean;
   level: "info" | "warning" | "error";
-  scope: "public" | "admin" | "both";
-  start_time?: string | null;
-  end_time?: string | null;
   created_at: string;
-}
-
-export interface SiteSettingRow {
-  key: string;
-  value: string | null;
-  description: string | null;
-  editable: boolean;
-  value_type: "string" | "number" | "boolean";
-}
-
-export interface AlertChannelRow {
-  id: string;
-  name: string;
-  type: "webhook" | "feishu" | "dingtalk" | "pushplus";
-  config: Record<string, unknown>;
-  enabled: boolean;
-  created_at: string;
-}
-
-export interface AlertRuleRow {
-  id: string;
-  name: string;
-  condition_type: "status_change" | "consecutive_failures" | "latency_threshold";
-  condition_params: Record<string, unknown>;
-  channel_ids: string[];
-  config_ids: string[] | null;
-  enabled: boolean;
-  cooldown_seconds: number;
-  created_at: string;
-}
-
-export interface AlertHistoryRow {
-  id: string;
-  rule_id: string;
-  channel_id: string;
-  config_id: string;
-  status: "sent" | "failed" | "skipped";
-  payload: Record<string, unknown> | null;
-  error_message: string | null;
-  triggered_at: string;
 }

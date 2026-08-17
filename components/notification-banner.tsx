@@ -43,10 +43,11 @@ export function NotificationBanner() {
 
   const notification = notifications[currentIndex];
 
+  // light：实色浅底；dark：实色 card 底 + tinted 边/字，避免 *-950 重色压顶
   const levelStyles = {
-    info: "bg-blue-50/90 text-blue-900 border-blue-200 dark:bg-blue-950/50 dark:text-blue-100 dark:border-blue-800",
-    warning: "bg-amber-50/90 text-amber-900 border-amber-200 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-800",
-    error: "bg-red-50/90 text-red-900 border-red-200 dark:bg-red-950/50 dark:text-red-100 dark:border-red-800",
+    info: "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-500/40 dark:bg-card dark:text-blue-400",
+    warning: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-card dark:text-amber-400",
+    error: "border-red-200 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-card dark:text-red-400",
   };
 
   const Icon = {
@@ -57,10 +58,10 @@ export function NotificationBanner() {
 
   return (
     <div className={cn(
-      "relative w-full border-b px-4 py-3 text-sm backdrop-blur-sm transition-all animate-in fade-in slide-in-from-top-2",
+      "relative w-full border-b px-4 py-3 text-sm transition-all animate-in fade-in slide-in-from-top-2",
       levelStyles[notification.level] || levelStyles.info
     )}>
-      <div className="mx-auto flex max-w-[1600px] items-start gap-3 md:items-center">
+      <div className="mx-auto flex max-w-7xl items-start gap-3 md:items-center">
         <Icon className="mt-0.5 h-4 w-4 shrink-0 md:mt-0" />
         <div className="flex-1 [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_p]:leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>

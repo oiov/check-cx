@@ -4,33 +4,28 @@ import {useCallback, useEffect, useState} from "react";
 
 import {DashboardView} from "@/components/dashboard-view";
 import {DashboardSkeleton} from "@/components/dashboard-skeleton";
+import {STATUS_META} from "@/lib/core/status";
 import {fetchWithCache} from "@/lib/core/frontend-cache";
-import {getSiteConfig} from "@/lib/utils/site-config-cache";
 import type {AvailabilityPeriod, DashboardData} from "@/lib/types";
+import {cn} from "@/lib/utils";
 
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
 export function DashboardBootstrap() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [siteConfig, setSiteConfig] = useState<Awaited<ReturnType<typeof getSiteConfig>> | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async (forceFresh?: boolean) => {
     try {
-      // 并行加载站点配置和 Dashboard 数据
-      const [config, result] = await Promise.all([
-        getSiteConfig(forceFresh),
-        fetchWithCache({
-          trendPeriod: DEFAULT_PERIOD,
-          forceFresh,
-          revalidateIfFresh: true,
-          onBackgroundUpdate: (nextData) => {
-            setData(nextData);
-          },
-        }),
-      ]);
+      const result = await fetchWithCache({
+        trendPeriod: DEFAULT_PERIOD,
+        forceFresh,
+        revalidateIfFresh: true,
+        onBackgroundUpdate: (nextData) => {
+          setData(nextData);
+        },
+      });
       setErrorMessage(null);
-      setSiteConfig(config);
       setData(result.data);
     } catch (error) {
       console.error("[check-cx] 首屏加载失败", error);
@@ -42,23 +37,19 @@ export function DashboardBootstrap() {
     let isActive = true;
     const run = async () => {
       try {
-        const [config, result] = await Promise.all([
-          getSiteConfig(),
-          fetchWithCache({
-            trendPeriod: DEFAULT_PERIOD,
-            revalidateIfFresh: true,
-            onBackgroundUpdate: (nextData) => {
-              if (isActive) {
-                setData(nextData);
-              }
-            },
-          }),
-        ]);
+        const result = await fetchWithCache({
+          trendPeriod: DEFAULT_PERIOD,
+          revalidateIfFresh: true,
+          onBackgroundUpdate: (nextData) => {
+            if (isActive) {
+              setData(nextData);
+            }
+          },
+        });
         if (!isActive) {
           return;
         }
         setErrorMessage(null);
-        setSiteConfig(config);
         setData(result.data);
       } catch (error) {
         if (!isActive) {
@@ -80,12 +71,17 @@ export function DashboardBootstrap() {
         <DashboardSkeleton />
         {errorMessage && (
           <div className="mt-6 flex justify-center">
-            <div className="inline-flex items-center gap-3 rounded-full border border-border/60 bg-background/60 px-4 py-2 text-sm text-muted-foreground">
+            <div
+              className={cn(
+                "inline-flex items-center gap-3 rounded-lg border px-4 py-2 text-sm",
+                STATUS_META.error.badgeClass
+              )}
+            >
               <span>{errorMessage}</span>
               <button
                 type="button"
                 onClick={() => loadData(true)}
-                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
+                className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
               >
                 重新加载
               </button>
@@ -96,5 +92,5 @@ export function DashboardBootstrap() {
     );
   }
 
-  return <DashboardView initialData={data} siteConfig={siteConfig} />;
+  return <DashboardView initialData={data} />;
 }

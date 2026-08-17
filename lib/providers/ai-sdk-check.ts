@@ -13,19 +13,20 @@
  * 4. 根据延迟阈值判定健康状态（operational/degraded/failed）
  *
  * 特殊支持：
- * - 推理模型（o1/o3/deepseek-r1 等）的 reasoning_effort 参数
+ * - 推理模型（o1/o3/deepseek-r1 等）的 reasoning 参数
  * - 自定义请求头和 metadata 注入
  * - 端点 Ping 延迟测量
  */
 
-import { streamText, generateText } from "ai";
+import { generateText, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGoogle } from "@ai-sdk/google";
 
-import type { CheckResult, HealthStatus, ProviderConfig } from "../types";
+import type { ChallengeOutcome, CheckResult, HealthStatus, ProviderConfig } from "../types";
 import { DEFAULT_ENDPOINTS } from "../types";
+import { getErrorMessage, getSanitizedErrorDetail } from "../utils";
 import { generateChallenge, validateResponse } from "./challenge";
 import { measureEndpointPing } from "./endpoint-ping";
 import { getSiteSettingSync } from "../core/site-settings";
@@ -39,24 +40,18 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 
 /** 性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
 function getDegradedThresholdMs(): number {
-  const v = Number(getSiteSettingSync("degraded_threshold_ms", "100000"));
-  return Number.isFinite(v) && v > 0 ? v : 100_000;
+  const raw = Number(getSiteSettingSync("degraded_threshold_ms", "6000"));
+  return Number.isFinite(raw) && raw > 0 ? raw : 6_000;
 }
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
-const EXCLUDED_METADATA_KEYS = new Set([
-  "model",
-  "prompt",
-  "messages",
-  "abortSignal",
-]);
+const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
 
 /** 用于从完整端点 URL 中提取 baseURL 的正则表达式 */
 const API_PATH_SUFFIX_REGEX = /\/(chat\/completions|responses|messages)\/?$/;
 
 /** 原生 Gemini 端点识别正则：包含 /models/ 且以 :generateContent 或 :streamGenerateContent 结尾 */
-const GOOGLE_GENERATIVE_API_REGEX =
-  /\/v\d+\w*\/models\/[^/:]+:(generateContent|streamGenerateContent)\/?$/;
+const GOOGLE_GENERATIVE_API_REGEX = /\/v\d+\w*\/models\/[^/:]+:(generateContent|streamGenerateContent)\/?$/;
 
 /**
  * 判断端点是否为原生 Gemini API
@@ -65,9 +60,7 @@ const GOOGLE_GENERATIVE_API_REGEX =
  * - https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
  * - https://generativelanguage.googleapis.com/v1/models/gemini-pro:streamGenerateContent
  */
-function isGoogleGenerativeEndpoint(
-  endpoint: string | null | undefined,
-): boolean {
+function isGoogleGenerativeEndpoint(endpoint: string | null | undefined): boolean {
   if (!endpoint) return false;
   return GOOGLE_GENERATIVE_API_REGEX.test(endpoint);
 }
@@ -80,9 +73,7 @@ function isGoogleGenerativeEndpoint(
  * // => "https://generativelanguage.googleapis.com/v1beta"
  */
 function extractGoogleBaseURL(endpoint: string): string {
-  const match = endpoint.match(
-    /^(https:\/\/generativelanguage.googleapis\.com\/v\d+\w*)/,
-  );
+  const match = endpoint.match(/^(https:\/\/generativelanguage\.googleapis\.com\/v\d+\w*)/);
   return match?.[1] || endpoint;
 }
 
@@ -106,6 +97,49 @@ function deriveBaseURL(endpoint: string): string {
 }
 
 /**
+ * 将配置端点上的查询参数合并到实际请求 URL 中
+ *
+ * SDK 在内部会基于 baseURL 重新拼接请求地址，导致配置在 endpoint 上的查询参数丢失。
+ * 这里统一把配置参数补回去，避免出现“配置了但请求没带上”的破事。
+ */
+function mergeEndpointQueryParams(
+  input: RequestInfo | URL,
+  endpoint: string
+): RequestInfo | URL {
+  let requestUrl: URL;
+
+  try {
+    requestUrl = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  } catch {
+    return input;
+  }
+
+  let endpointUrl: URL;
+  try {
+    endpointUrl = new URL(endpoint);
+  } catch {
+    return input;
+  }
+
+  if (!endpointUrl.search) {
+    return input;
+  }
+
+  for (const key of new Set(endpointUrl.searchParams.keys())) {
+    requestUrl.searchParams.delete(key);
+    for (const value of endpointUrl.searchParams.getAll(key)) {
+      requestUrl.searchParams.append(key, value);
+    }
+  }
+
+  if (input instanceof Request) {
+    return new Request(requestUrl, input);
+  }
+
+  return requestUrl;
+}
+
+/**
  * 判断端点是否为 OpenAI Responses API
  *
  * OpenAI 提供两种 API：
@@ -125,7 +159,7 @@ function isResponsesEndpoint(endpoint: string | null | undefined): boolean {
 /**
  * 推理强度级别
  *
- * 用于 OpenAI 推理模型（o1/o3 系列）的 reasoning_effort 参数：
+ * 对应 AI SDK 顶层 `reasoning` 选项（provider-agnostic）：
  * - low：快速推理，token 消耗少
  * - medium：平衡模式（推理模型默认值）
  * - high：深度推理，结果更准确但 token 消耗多
@@ -182,9 +216,7 @@ function parseModelDirective(model: string): {
   if (!trimmed) return { modelId: model };
 
   // 匹配 model@effort 或 model#effort 格式
-  const directiveMatch = trimmed.match(
-    /^(.*?)[@#](mini|minimal|low|medium|high)$/i,
-  );
+  const directiveMatch = trimmed.match(/^(.*?)[@#](mini|minimal|low|medium|high)$/i);
   if (directiveMatch) {
     const [, baseModel, effortKey] = directiveMatch;
     return {
@@ -194,9 +226,7 @@ function parseModelDirective(model: string): {
   }
 
   // 推理模型默认使用 medium
-  const isReasoningModel = REASONING_MODEL_PATTERNS.some((pattern) =>
-    pattern.test(trimmed),
-  );
+  const isReasoningModel = REASONING_MODEL_PATTERNS.some((pattern) => pattern.test(trimmed));
   if (isReasoningModel) {
     return { modelId: trimmed, reasoningEffort: "medium" };
   }
@@ -215,14 +245,12 @@ function parseModelDirective(model: string): {
  * 用户自定义的 metadata 中如果包含这些字段会导致冲突
  */
 function filterMetadata(
-  metadata: Record<string, unknown> | null | undefined,
+  metadata: Record<string, unknown> | null | undefined
 ): Record<string, unknown> | null {
   if (!metadata) return null;
 
   const filtered = Object.fromEntries(
-    Object.entries(metadata).filter(
-      ([key]) => !EXCLUDED_METADATA_KEYS.has(key),
-    ),
+    Object.entries(metadata).filter(([key]) => !EXCLUDED_METADATA_KEYS.has(key))
   );
 
   return Object.keys(filtered).length > 0 ? filtered : null;
@@ -239,10 +267,13 @@ function filterMetadata(
  * @param headers - 要注入的自定义请求头
  */
 function createCustomFetch(
+  endpoint: string,
   metadata: Record<string, unknown> | null,
-  headers: Record<string, string>,
+  headers: Record<string, string>
 ): typeof fetch {
   return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestInput = mergeEndpointQueryParams(input, endpoint);
+
     // 使用 Headers API 确保用户 headers 完全覆盖 SDK headers
     const mergedHeaders = new Headers(init?.headers);
     for (const [key, value] of Object.entries(headers)) {
@@ -251,24 +282,21 @@ function createCustomFetch(
 
     // 非 POST 请求或无 body 时，仅注入 headers
     if (init?.method?.toUpperCase() !== "POST" || !init.body) {
-      return fetch(input, { ...init, headers: mergedHeaders });
+      return fetch(requestInput, { ...init, headers: mergedHeaders });
     }
 
     // POST 请求：尝试将 metadata 合并到请求体
     try {
-      const originalBody =
-        typeof init.body === "string" ? JSON.parse(init.body) : init.body;
-      const mergedBody = metadata
-        ? { ...originalBody, ...metadata }
-        : originalBody;
-      return fetch(input, {
+      const originalBody = typeof init.body === "string" ? JSON.parse(init.body) : init.body;
+      const mergedBody = metadata ? { ...originalBody, ...metadata } : originalBody;
+      return fetch(requestInput, {
         ...init,
         headers: mergedHeaders,
         body: JSON.stringify(mergedBody),
       });
     } catch {
       // JSON 解析失败时，仅注入 headers
-      return fetch(input, { ...init, headers: mergedHeaders });
+      return fetch(requestInput, { ...init, headers: mergedHeaders });
     }
   };
 }
@@ -298,42 +326,25 @@ function createModel(config: ProviderConfig) {
     "User-Agent": "check-cx/0.1.0",
     ...config.requestHeaders,
   };
-  const customFetch = createCustomFetch(
-    filterMetadata(config.metadata),
-    headers,
-  );
+  const customFetch = createCustomFetch(endpoint, filterMetadata(config.metadata), headers);
 
   switch (config.type) {
     case "openai": {
-      const provider = createOpenAI({
-        apiKey: config.apiKey,
-        baseURL,
-        fetch: customFetch,
-      });
+      const provider = createOpenAI({ apiKey: config.apiKey, baseURL, fetch: customFetch });
 
       // Responses API 使用 provider.responses()，Chat Completions 使用 provider.chat()
       const isResponses = isResponsesEndpoint(endpoint);
       return {
-        model: isResponses
-          ? provider.responses(modelId)
-          : provider.chat(modelId),
+        model: isResponses ? provider.responses(modelId) : provider.chat(modelId),
         reasoningEffort,
         isResponses,
       };
     }
 
     case "anthropic": {
-      const provider = createAnthropic({
-        apiKey: config.apiKey,
-        baseURL,
-        fetch: customFetch,
-      });
+      const provider = createAnthropic({ apiKey: config.apiKey, baseURL, fetch: customFetch });
       // Anthropic 不支持 reasoning_effort
-      return {
-        model: provider(modelId),
-        reasoningEffort: undefined,
-        isResponses: false,
-      };
+      return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
     }
 
     case "gemini": {
@@ -341,7 +352,7 @@ function createModel(config: ProviderConfig) {
       if (isGoogleGenerativeEndpoint(endpoint)) {
         // 原生 Gemini API：使用 @ai-sdk/google
         const googleBaseURL = extractGoogleBaseURL(endpoint);
-        const provider = createGoogleGenerativeAI({
+        const provider = createGoogle({
           apiKey: config.apiKey,
           baseURL: googleBaseURL,
           fetch: customFetch,
@@ -360,22 +371,8 @@ function createModel(config: ProviderConfig) {
           baseURL,
           fetch: customFetch,
         });
-        return {
-          model: provider(modelId),
-          reasoningEffort: undefined,
-          isResponses: false,
-        };
+        return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
       }
-    }
-
-    case "grok": {
-      const provider = createOpenAICompatible({
-        name: "grok",
-        apiKey: config.apiKey,
-        baseURL,
-        fetch: customFetch,
-      });
-      return { model: provider(modelId), reasoningEffort, isResponses: false };
     }
 
     default:
@@ -383,67 +380,12 @@ function createModel(config: ProviderConfig) {
   }
 }
 
-/* ============================================================================
- * 错误处理
- * ============================================================================ */
-
-/** AI SDK APICallError 类型定义 */
+/** AI SDK APICallError 类型定义（onError 回调与 catch 分支共用） */
 interface AIApiCallError extends Error {
   statusCode?: number;
   responseBody?: string;
-}
-
-/**
- * 判断错误是否为超时错误
- *
- * 超时错误特征：
- * - 错误名称为 "AbortError"（AbortController 触发）
- * - 错误消息包含 "request was aborted" 或 "timeout"
- */
-function isTimeoutError(error: Error & { name?: string }): boolean {
-  if (!error) return false;
-  if (error.name === "AbortError") return true;
-  const message = error.message || "";
-  return /request was aborted|timeout/i.test(message);
-}
-
-/**
- * 从 responseBody 中提取错误消息
- *
- * 尝试解析 SSE 格式的错误响应：data:{"message":"xxx"}
- */
-function extractMessageFromBody(body: string): string | null {
-  const match = body.match(/"message"\s*:\s*"([^"]+)"/);
-  return match?.[1] ?? null;
-}
-
-/**
- * 从错误对象中提取用户友好的错误消息
- *
- * AI SDK 的 APICallError 包含 statusCode、responseBody、message 三个信息源，
- * 按优先级提取最有价值的错误描述
- */
-function getErrorMessage(error: AIApiCallError): string {
-  if (isTimeoutError(error)) return "请求超时";
-
-  // 优先从 responseBody 提取详细信息
-  if (error.responseBody) {
-    const extracted = extractMessageFromBody(error.responseBody);
-    if (extracted) {
-      return error.statusCode
-        ? `[${error.statusCode}] ${extracted}`
-        : extracted;
-    }
-  }
-
-  // 回退到基础 message
-  if (error.message) {
-    return error.statusCode
-      ? `[${error.statusCode}] ${error.message}`
-      : error.message;
-  }
-
-  return "未知错误";
+  lastError?: unknown;
+  errors?: unknown[];
 }
 
 /* ============================================================================
@@ -467,6 +409,8 @@ function buildCheckResult(
   status: HealthStatus | "validation_failed" | "failed" | "error",
   latencyMs: number | null,
   message: string,
+  logMessage?: string,
+  challengeOutcome?: ChallengeOutcome
 ): CheckResult {
   return {
     id: params.config.id,
@@ -479,32 +423,10 @@ function buildCheckResult(
     pingLatencyMs: params.pingLatencyMs,
     checkedAt: new Date().toISOString(),
     message,
+    ...(logMessage ? { logMessage } : {}),
+    ...(challengeOutcome ? { challenge: challengeOutcome } : {}),
+    groupName: params.config.groupName || null,
   };
-}
-
-/* ============================================================================
- * 调试日志
- * ============================================================================ */
-
-/**
- * 打印检查结果调试日志
- *
- * 格式：[provider] 分组 | 名称 | Q: 问题 | A: 回答 | 期望: 答案 | 验证: 状态
- */
-function logCheckResult(
-  config: ProviderConfig,
-  prompt: string,
-  response: string,
-  expectedAnswer: string,
-  isValid: boolean | null,
-): void {
-  const validStatus =
-    isValid === null ? "失败(空回复)" : isValid ? "通过" : "失败";
-  const groupName = config.groupName || "默认";
-  const normalizedPrompt = prompt.replace(/\r?\n/g, " ");
-  console.log(
-    `[${config.type}] ${groupName} | ${config.name} | Q: ${normalizedPrompt} | A: ${response || "(空)"} | 期望: ${expectedAnswer} | 验证: ${validStatus}`,
-  );
 }
 
 /* ============================================================================
@@ -515,7 +437,7 @@ function logCheckResult(
  * 统一的 AI Provider 健康检查函数
  *
  * 执行流程：
- * 1. 生成随机数学挑战（防止假站点用固定回复绕过）
+ * 1. 生成随机语言挑战（防止假站点用固定回复绕过）
  * 2. 使用流式 API 发送请求，收集完整响应
  * 3. 验证响应中是否包含正确答案
  * 4. 根据延迟和验证结果判定健康状态
@@ -523,15 +445,13 @@ function logCheckResult(
  * 状态判定规则：
  * - operational：请求成功、验证通过、延迟 ≤ 6000ms
  * - degraded：请求成功、验证通过、延迟 > 6000ms
- * - validation_failed：收到回复但答案验证失败
+ * - validation_failed：收到回复但难度 1/2 题答案验证失败
  * - failed：请求失败、超时或回复为空
  * - error：请求过程中发生异常
+ *
+ * 难度 3-5 的能力评估题答错不影响健康状态，仅记录到 check_challenges。
  */
-export async function checkWithAiSdk(
-  config: ProviderConfig,
-): Promise<CheckResult> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResult> {
   const startedAt = Date.now();
 
   const displayEndpoint = config.endpoint || DEFAULT_ENDPOINTS[config.type];
@@ -548,31 +468,26 @@ export async function checkWithAiSdk(
   try {
     const { model, reasoningEffort } = createModel(config);
 
-    // 仅 OpenAI 推理模型需要 providerOptions
-    const providerOptions =
-      reasoningEffort && config.type === "openai"
-        ? { openai: { reasoningEffort } }
-        : undefined;
-
-    let collectedResponse = "";
+    // 捕获流处理过程中的错误
     let streamError: AIApiCallError | null = null;
 
+    // 期望输出仅一个词：非推理模型锁死输出上限，省钱且防恶意端点猛吐输出刷成本。
+    // 推理模型的隐藏推理会占用输出预算，故不限制以免被饿死。
+    let collectedResponse = "";
+
+    const generationOptions = {
+      model,
+      prompt: challenge.prompt,
+      timeout: DEFAULT_TIMEOUT_MS,
+      ...(reasoningEffort ? { reasoning: reasoningEffort } : { maxOutputTokens: 24 }),
+    };
+
     if (config.streamMode === "generate") {
-      // 非流式模式：使用 generateText，适用于只支持非流式响应的接口
-      const result = await generateText({
-        model,
-        prompt: challenge.prompt,
-        abortSignal: controller.signal,
-        ...(providerOptions && { providerOptions }),
-      });
+      const result = await generateText(generationOptions);
       collectedResponse = result.text;
     } else {
-      // 流式模式（默认）：使用 streamText，测量首 token 延迟
       const result = streamText({
-        model,
-        prompt: challenge.prompt,
-        abortSignal: controller.signal,
-        ...(providerOptions && { providerOptions }),
+        ...generationOptions,
         onError({ error }) {
           streamError = error as AIApiCallError;
         },
@@ -586,75 +501,66 @@ export async function checkWithAiSdk(
     const latencyMs = Date.now() - startedAt;
     const params = await buildParams();
 
+    // 检查流处理过程中是否有错误
     if (streamError) {
-      logCheckResult(
-        config,
-        challenge.prompt,
-        "",
-        challenge.expectedAnswer,
-        null,
-      );
       return buildCheckResult(
         params,
         "error",
         latencyMs,
         getErrorMessage(streamError),
+        getSanitizedErrorDetail(streamError)
       );
     }
 
     // 空回复
     if (!collectedResponse.trim()) {
-      logCheckResult(
-        config,
-        challenge.prompt,
-        "",
-        challenge.expectedAnswer,
-        null,
-      );
       return buildCheckResult(params, "failed", latencyMs, "回复为空");
     }
 
     // 验证答案
-    const { valid, extractedNumbers } = validateResponse(
-      collectedResponse,
-      challenge.expectedAnswer,
-    );
-    logCheckResult(
-      config,
-      challenge.prompt,
-      collectedResponse,
-      challenge.expectedAnswer,
-      valid,
-    );
+    const { valid, normalized } = validateResponse(collectedResponse, challenge.expectedAnswer);
 
-    if (!valid) {
-      const actualNumbers = extractedNumbers?.join(", ") || "(无数字)";
+    const challengeOutcome: ChallengeOutcome = {
+      difficulty: challenge.difficulty,
+      category: challenge.category,
+      expectedAnswer: challenge.expectedAnswer,
+      responseExcerpt: normalized,
+      passed: valid,
+    };
+
+    // 难度 1/2 答错视为故障（任何真 LLM 都应通过）；
+    // 难度 3-5 答错仅记录能力评估，不影响健康状态，避免弱模型健康抖动
+    if (!valid && challenge.difficulty <= 2) {
+      const actual = normalized || "(空)";
       return buildCheckResult(
         params,
         "validation_failed",
         latencyMs,
-        `回复验证失败: 期望 ${challenge.expectedAnswer}, 实际: ${actualNumbers}`,
+        `回复验证失败: 期望 "${challenge.expectedAnswer}", 实际: "${actual}"`,
+        undefined,
+        challengeOutcome
       );
     }
 
     // 判定健康状态
-    const status: HealthStatus =
-      latencyMs <= getDegradedThresholdMs() ? "operational" : "degraded";
-    const message =
-      status === "degraded"
+    const status: HealthStatus = latencyMs <= getDegradedThresholdMs()
+      ? "operational"
+      : "degraded";
+    const message = !valid
+      ? `高难度题验证未通过（不计入健康状态）: 期望 "${challenge.expectedAnswer}" (${latencyMs}ms)`
+      : status === "degraded"
         ? `响应成功但耗时 ${latencyMs}ms`
         : `验证通过 (${latencyMs}ms)`;
 
-    return buildCheckResult(params, status, latencyMs, message);
+    return buildCheckResult(params, status, latencyMs, message, undefined, challengeOutcome);
   } catch (error) {
     const params = await buildParams();
     return buildCheckResult(
       params,
       "error",
       null,
-      getErrorMessage(error as AIApiCallError),
+      getErrorMessage(error),
+      getSanitizedErrorDetail(error)
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }

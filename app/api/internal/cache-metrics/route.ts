@@ -4,8 +4,6 @@ import { getConfigCacheMetrics, resetConfigCacheMetrics } from "@/lib/database/c
 import { getGroupInfoCacheMetrics, resetGroupInfoCacheMetrics } from "@/lib/database/group-info";
 import { getDashboardCacheMetrics, resetDashboardCacheMetrics } from "@/lib/core/dashboard-data";
 
-export const revalidate = 0;
-export const dynamic = "force-dynamic";
 
 function isAuthorized(request: Request): boolean {
   const token = process.env.INTERNAL_METRICS_TOKEN;

@@ -4,14 +4,14 @@
  */
 
 // 数据库类型
-export type { CheckConfigRow, CheckHistoryRow, AlertChannelRow, AlertRuleRow, AlertHistoryRow } from "./database";
+export type { CheckChallengeRow, CheckConfigRow, CheckHistoryRow, CheckModelRow } from "./database";
 
 // Provider 类型
 export type { ProviderType, ProviderConfig } from "./provider";
 export { DEFAULT_ENDPOINTS } from "./provider";
 
 // 检查结果类型
-export type { HealthStatus, CheckResult } from "./check";
+export type { ChallengeOutcome, HealthStatus, CheckResult } from "./check";
 
 // 官方状态类型
 export type { OfficialHealthStatus, OfficialStatusResult } from "./official-status";

@@ -4,7 +4,12 @@
 
 export { cn } from "./cn";
 export { extractMessage } from "./url-helpers";
-export { logError, getErrorMessage } from "./error-handler";
+export {
+  logError,
+  getErrorMessage,
+  getSanitizedErrorDetail,
+  toDisplayErrorMessage,
+} from "./error-handler";
 export { formatLocalTime } from "./time";
 export { getOrCreateClientCache } from "./client-cache";
 export { stableStringify } from "./cache-key";

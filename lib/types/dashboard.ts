@@ -17,8 +17,9 @@ export type AvailabilityStatsMap = Record<string, AvailabilityStat[]>;
 
 export interface GroupInfoSummary {
   groupName: string;
-  websiteUrl?: string | null;
+  displayName?: string | null;
   description?: string | null;
+  websiteUrl?: string | null;
   tags: string;
 }
 
@@ -44,7 +45,6 @@ export interface GroupedProviderTimelines {
   displayName: string; // 显示名称（未分组为 "未分组"）
   timelines: ProviderTimeline[];
   websiteUrl?: string | null; // 网站地址
-  description?: string | null; // 分组描述
   tags: string; // 分组 Tag（英文逗号分隔字符串）
 }
 

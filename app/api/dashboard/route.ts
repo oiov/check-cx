@@ -4,8 +4,6 @@ import {loadDashboardDataWithEtag} from "@/lib/core/dashboard-data";
 import {getPollingIntervalMs} from "@/lib/core/polling-config";
 import type {AvailabilityPeriod} from "@/lib/types";
 
-export const revalidate = 0;
-export const dynamic = "force-dynamic";
 
 const VALID_PERIODS: AvailabilityPeriod[] = ["7d", "15d", "30d"];
 

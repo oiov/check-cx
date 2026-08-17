@@ -1,35 +1,21 @@
 "use client"
 
 import * as React from "react"
-import {Moon, Sun} from "lucide-react"
+import {Laptop, Moon, Sun} from "lucide-react"
 import {useTheme} from "next-themes"
 import {Button} from "@/components/ui/button"
 
 export function ThemeToggle() {
-  const { setTheme, resolvedTheme } = useTheme()
-  const [mounted, setMounted] = React.useState(false)
-  const [inIframe] = React.useState(() => {
-    if (typeof document === "undefined") return false
-    return document.documentElement.classList.contains("in-iframe")
-  })
-
-  React.useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  React.useEffect(() => {
-    if (inIframe) {
-      setTheme("light")
-    }
-  }, [inIframe, setTheme])
-
-  if (inIframe) {
-    return null
-  }
+  const { setTheme, theme } = useTheme()
+  const mounted = React.useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false
+  )
 
   if (!mounted) {
     return (
-      <Button variant="outline" size="icon" className="h-9 w-9 rounded-full border-border/40 bg-background/60 backdrop-blur-sm">
+      <Button variant="outline" size="icon" className="h-9 w-9 rounded-full">
         <span className="sr-only">Toggle theme</span>
       </Button>
     )
@@ -40,12 +26,17 @@ export function ThemeToggle() {
       variant="outline"
       size="icon"
       onClick={() => {
-        setTheme(resolvedTheme === "dark" ? "light" : "dark")
+        if (theme === 'light') setTheme('dark')
+        else if (theme === 'dark') setTheme('system')
+        else setTheme('light')
       }}
-      className="h-9 w-9 rounded-full border-border/40 bg-background/60 backdrop-blur-sm hover:bg-background/80 transition-all"
+      className="h-9 w-9 rounded-full hover:bg-muted transition-all"
     >
       <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
       <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+      {theme === 'system' && (
+        <Laptop className="absolute h-[0.8rem] w-[0.8rem] translate-y-2 translate-x-2 opacity-50" />
+      )}
       <span className="sr-only">Toggle theme</span>
     </Button>
   )

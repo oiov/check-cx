@@ -4,9 +4,11 @@ import {useCallback, useEffect, useState} from "react";
 
 import {GroupDashboardView} from "@/components/group-dashboard-view";
 import {GroupDashboardSkeleton} from "@/components/dashboard-skeleton";
+import {STATUS_META} from "@/lib/core/status";
 import {fetchGroupWithCache} from "@/lib/core/group-frontend-cache";
 import type {GroupDashboardData} from "@/lib/core/group-data";
 import type {AvailabilityPeriod} from "@/lib/types";
+import {cn} from "@/lib/utils";
 
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
@@ -79,12 +81,17 @@ export function GroupDashboardBootstrap({ groupName }: GroupDashboardBootstrapPr
         <GroupDashboardSkeleton />
         {errorMessage && (
           <div className="mt-6 flex justify-center">
-            <div className="inline-flex items-center gap-3 rounded-full border border-border/60 bg-background/60 px-4 py-2 text-sm text-muted-foreground">
+            <div
+              className={cn(
+                "inline-flex items-center gap-3 rounded-lg border px-4 py-2 text-sm",
+                STATUS_META.error.badgeClass
+              )}
+            >
               <span>{errorMessage}</span>
               <button
                 type="button"
                 onClick={() => loadData(true)}
-                className="rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
+                className="rounded-md bg-foreground px-3 py-1 text-xs font-medium text-background transition-colors hover:bg-foreground/90"
               >
                 重新加载
               </button>

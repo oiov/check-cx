@@ -5,7 +5,7 @@
 /**
  * 支持的 AI Provider 类型
  */
-export type ProviderType = "openai" | "gemini" | "anthropic" | "grok";
+export type ProviderType = "openai" | "gemini" | "anthropic";
 
 /**
  * Provider 配置
@@ -31,5 +31,4 @@ export const DEFAULT_ENDPOINTS: Record<ProviderType, string> = {
   openai: "https://api.openai.com/v1/chat/completions",
   gemini: "https://generativelanguage.googleapis.com",
   anthropic: "https://api.anthropic.com/v1/messages",
-  grok: "https://api.x.ai/v1/chat/completions",
 };

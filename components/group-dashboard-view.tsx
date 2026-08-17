@@ -1,11 +1,11 @@
 "use client";
 
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Activity, ExternalLink, LayoutGrid, List, RefreshCcw} from "lucide-react";
+import {Activity, ExternalLink, RefreshCcw} from "lucide-react";
 
 import {GroupTags} from "@/components/group-tags";
 import {ProviderCard} from "@/components/provider-card";
-import {ProviderListItem} from "@/components/provider-list-item";
+import {StatusSummary} from "@/components/status-summary";
 import {ClientTime} from "@/components/client-time";
 import {fetchGroupWithCache, prefetchGroupData, setGroupCache} from "@/lib/core/group-frontend-cache";
 import type {AvailabilityPeriod, ProviderTimeline} from "@/lib/types";
@@ -43,22 +43,6 @@ const PERIOD_OPTIONS: Array<{ value: AvailabilityPeriod; label: string }> = [
   { value: "30d", label: "30 天" },
 ];
 
-type ViewMode = "card" | "list";
-
-/** Tech-style decorative corner plus marker */
-const CornerPlus = ({ className }: { className?: string }) => (
-  <svg 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="1" 
-    className={cn("absolute h-4 w-4 text-muted-foreground/40", className)}
-  >
-    <line x1="12" y1="0" x2="12" y2="24" />
-    <line x1="0" y1="12" x2="24" y2="12" />
-  </svg>
-);
-
 /**
  * 分组 Dashboard 视图
  * - 展示单个分组内的所有 Provider 卡片
@@ -69,7 +53,6 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
   const [selectedPeriod, setSelectedPeriod] = useState<AvailabilityPeriod>(
     initialData.trendPeriod ?? "7d"
   );
-  const [viewMode, setViewMode] = useState<ViewMode>("card");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const lockRef = useRef(false);
   const [timeToNextRefresh, setTimeToNextRefresh] = useState<number | null>(() =>
@@ -79,8 +62,6 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
       initialData.generatedAt
     )
   );
-  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
-  const [activeOfficialCardId, setActiveOfficialCardId] = useState<string | null>(null);
   const latestCheckTimestamp = useMemo(
     () => getLatestCheckTimestamp(data.providerTimelines),
     [data.providerTimelines]
@@ -118,51 +99,20 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
   }, [groupName, selectedPeriod]);
 
   useEffect(() => {
-    setData(initialData);
-    if (initialData.trendPeriod) {
-      setGroupCache(groupName, initialData.trendPeriod, initialData);
-    }
+    const frame = window.requestAnimationFrame(() => {
+      setData(initialData);
+      if (initialData.trendPeriod) {
+        setGroupCache(groupName, initialData.trendPeriod, initialData);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [groupName, initialData]);
 
   useEffect(() => {
     const currentPeriod = data.trendPeriod ?? "7d";
     prefetchGroupData(groupName, ["7d", "15d", "30d"], currentPeriod).catch(() => undefined);
   }, [data.trendPeriod, groupName]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const savedViewMode = localStorage.getItem("check-cx-view-mode");
-    if (savedViewMode && ["card", "list"].includes(savedViewMode)) {
-      setViewMode(savedViewMode as ViewMode);
-    }
-
-    const media = window.matchMedia("(pointer: coarse)");
-
-    const updatePointerType = () => {
-      const hasTouch = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
-      setIsCoarsePointer(media.matches || hasTouch);
-    };
-
-    updatePointerType();
-    media.addEventListener("change", updatePointerType);
-
-    return () => media.removeEventListener("change", updatePointerType);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("check-cx-view-mode", viewMode);
-    }
-  }, [viewMode]);
-
-  useEffect(() => {
-    if (!isCoarsePointer) {
-      setActiveOfficialCardId(null);
-    }
-  }, [isCoarsePointer]);
 
   useEffect(() => {
     if (!data.pollIntervalMs || data.pollIntervalMs <= 0) {
@@ -178,13 +128,19 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
     if (selectedPeriod === data.trendPeriod) {
       return;
     }
-    refresh(selectedPeriod).catch(() => undefined);
+    const frame = window.requestAnimationFrame(() => {
+      refresh(selectedPeriod).catch(() => undefined);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [data.trendPeriod, refresh, selectedPeriod]);
 
   useEffect(() => {
     if (!data.pollIntervalMs || data.pollIntervalMs <= 0 || latestCheckTimestamp === null) {
-      setTimeToNextRefresh(null);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        setTimeToNextRefresh(null);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
 
     const updateCountdown = () => {
@@ -193,9 +149,12 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
       );
     };
 
-    updateCountdown();
+    const frame = window.requestAnimationFrame(updateCountdown);
     const countdownTimer = window.setInterval(updateCountdown, 1000);
-    return () => window.clearInterval(countdownTimer);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(countdownTimer);
+    };
   }, [data.pollIntervalMs, latestCheckTimestamp]);
 
   const { providerTimelines, total, lastUpdated, pollIntervalLabel, displayName } = data;
@@ -223,207 +182,95 @@ export function GroupDashboardView({ groupName, initialData }: GroupDashboardVie
 
   return (
     <div className="relative">
-      <CornerPlus className="fixed left-4 top-4 h-6 w-6 text-border md:left-8 md:top-8" />
-      <CornerPlus className="fixed right-4 top-4 h-6 w-6 text-border md:right-8 md:top-8" />
-      <CornerPlus className="fixed bottom-4 left-4 h-6 w-6 text-border md:bottom-8 md:left-8" />
-      <CornerPlus className="fixed bottom-4 right-4 h-6 w-6 text-border md:bottom-8 md:right-8" />
-
-      <header className="relative z-10 mb-6 flex flex-col justify-between gap-4 sm:mb-8 sm:gap-6 lg:flex-row lg:items-end">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-foreground text-background sm:h-8 sm:w-8">
-              <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+      <header className="mb-6 space-y-3 sm:mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+                {displayName}
+              </h1>
+              <GroupTags tags={data.tags} />
+              {data.websiteUrl && (
+                <a
+                  href={data.websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              )}
             </div>
-            <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground sm:text-sm">
-              Group View
-            </span>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="max-w-2xl text-2xl font-extrabold leading-tight tracking-tight sm:text-4xl md:text-5xl">
-              {displayName}
-            </h1>
-            <GroupTags tags={data.tags} />
-            {data.websiteUrl && (
-              <a
-                href={data.websiteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center rounded-full bg-muted/50 p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <ExternalLink className="h-6 w-6" />
-              </a>
-            )}
-          </div>
-          {data.description && (
-            <p className="max-w-2xl text-base text-muted-foreground">{data.description}</p>
-          )}
-          
-           <div className="flex flex-wrap items-center gap-2.5">
-            {statusSummary.operational > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-                 <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                {statusSummary.operational} 正常
-              </span>
-            )}
-            {statusSummary.degraded > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                {statusSummary.degraded} 延迟
-              </span>
-            )}
-            {statusSummary.failed > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                {statusSummary.failed} 异常
-              </span>
-            )}
-            {statusSummary.validation_failed > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
-                {statusSummary.validation_failed} 验证失败
-              </span>
-            )}
-            {statusSummary.error > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600/10 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                {statusSummary.error} 错误
-              </span>
-            )}
-             {statusSummary.maintenance > 0 && (
-               <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                {statusSummary.maintenance} 维护
-              </span>
-            )}
-            <span className="text-xs text-muted-foreground/60">|</span>
-            <span className="text-xs text-muted-foreground">{total} 个配置</span>
-          </div>
-        </div>
-
-        <div className="flex flex-col items-start gap-4 lg:items-end">
-          <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="pl-1">视图</span>
-            <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-              <button
-                type="button"
-                onClick={() => setViewMode("card")}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                  viewMode === "card"
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <LayoutGrid className="h-3 w-3" />
-                卡片
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                  viewMode === "list"
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <List className="h-3 w-3" />
-                列表
-              </button>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <StatusSummary counts={statusSummary} />
+              <span className="text-xs text-muted-foreground/60">|</span>
+              <span className="text-xs text-muted-foreground">{total} 个配置</span>
             </div>
           </div>
 
-           <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-             <span className="pl-1">可用性区间</span>
-             <div className="flex items-center gap-1 rounded-full bg-muted/30 p-0.5">
-               {PERIOD_OPTIONS.map((option) => (
-                 <button
-                   key={option.value}
-                   type="button"
-                   onClick={() => setSelectedPeriod(option.value)}
-                   className={cn(
-                     "rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors",
-                     selectedPeriod === option.value
-                       ? "bg-foreground text-background"
-                       : "text-muted-foreground hover:text-foreground"
-                   )}
-                 >
-                   {option.label}
-                 </button>
-               ))}
-             </div>
-           </div>
+          <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">
+            <div className="flex flex-1 items-center gap-1 rounded-md border bg-background p-0.5 text-xs sm:flex-none">
+              {PERIOD_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedPeriod(option.value)}
+                  className={cn(
+                    "flex-1 whitespace-nowrap rounded px-2 py-1 font-medium transition-colors sm:flex-none",
+                    selectedPeriod === option.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
 
-           {/* Status Pill */}
-           <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-4 py-1.5 backdrop-blur-sm">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-75" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
-              </span>
-              <span className="text-xs font-semibold uppercase tracking-wider">Operational</span>
-           </div>
-
-           {lastUpdated && (
-             <div className="flex items-center gap-3 text-xs font-medium text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <RefreshCcw className={cn("h-3 w-3", isRefreshing && "animate-spin")} />
-                  <span>更新于 <ClientTime value={lastUpdated} /></span>
-                </div>
-                <span className="opacity-30">|</span>
-                <span>{pollIntervalLabel} 轮询</span>
+            {lastUpdated && (
+              <div className="flex w-full min-w-0 items-center gap-2 text-xs text-muted-foreground sm:w-auto">
+                <RefreshCcw className={cn("h-3 w-3 shrink-0", isRefreshing && "animate-spin")} />
+                <span className="truncate">
+                  <span className="whitespace-nowrap">更新于 <ClientTime value={lastUpdated} /></span>
+                  <span className="mx-1.5 opacity-30">|</span>
+                  <span className="whitespace-nowrap">{pollIntervalLabel} 轮询</span>
+                </span>
                 <button
                   type="button"
                   onClick={() => refresh(selectedPeriod, true)}
                   disabled={isRefreshing}
                   className={cn(
-                    "rounded-full border border-border/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:border-border/80 hover:text-foreground",
+                    "ml-auto shrink-0 rounded-lg border px-2.5 py-1 font-medium transition-colors hover:border-foreground/20 hover:text-foreground sm:ml-0",
                     isRefreshing && "cursor-not-allowed opacity-60"
                   )}
                 >
                   刷新
                 </button>
-             </div>
-           )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {total === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-border/50 bg-muted/20 py-20 text-center">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-20 text-center">
             <div className="mb-4 rounded-full bg-muted/50 p-4">
               <Activity className="h-8 w-8 text-muted-foreground" />
             </div>
             <h3 className="text-lg font-semibold">该分组下暂无配置</h3>
           </div>
       ) : (
-        viewMode === "list" ? (
-          <section className="space-y-2">
-            {providerTimelines.map((timeline) => (
-              <ProviderListItem
-                key={timeline.id}
-                timeline={timeline}
-                timeToNextRefresh={timeToNextRefresh}
-                availabilityStats={availabilityStats[timeline.id]}
-                selectedPeriod={selectedPeriod}
-              />
-            ))}
-          </section>
-        ) : (
-          <section className={`grid gap-4 ${gridColsClass}`}>
-            {providerTimelines.map((timeline) => (
-              <ProviderCard
-                key={timeline.id}
-                timeline={timeline}
-                timeToNextRefresh={timeToNextRefresh}
-                isCoarsePointer={isCoarsePointer}
-                activeOfficialCardId={activeOfficialCardId}
-                setActiveOfficialCardId={setActiveOfficialCardId}
-                availabilityStats={availabilityStats[timeline.id]}
-                selectedPeriod={selectedPeriod}
-              />
-            ))}
-          </section>
-        )
+        <section className={`grid gap-4 ${gridColsClass}`}>
+          {providerTimelines.map((timeline) => (
+            <ProviderCard
+              key={timeline.id}
+              timeline={timeline}
+              timeToNextRefresh={timeToNextRefresh}
+              availabilityStats={availabilityStats[timeline.id]}
+              selectedPeriod={selectedPeriod}
+            />
+          ))}
+        </section>
       )}
     </div>
   );

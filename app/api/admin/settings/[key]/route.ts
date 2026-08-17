@@ -1,42 +1,33 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+
+import { getAdminClaims } from "@/lib/admin/auth";
 import { refreshSiteSettings } from "@/lib/core/site-settings";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-async function requireAuth() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims ?? null;
-}
+interface Context { params: Promise<{ key: string }> }
+const ALLOWED_KEYS = new Set([
+  "check_poll_interval_seconds",
+  "degraded_threshold_ms",
+  "max_concurrency",
+  "history_retention_count",
+  "site.title",
+  "site.description",
+  "site.url",
+  "site.keywords",
+  "site.logo_url",
+  "site.favicon_url",
+  "site.github_url",
+]);
 
-export async function PATCH(request: NextRequest, { params }: { params: Promise<{ key: string }> }) {
-  if (!(await requireAuth())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { key } = await params;
+export async function PATCH(request: NextRequest, context: Context) {
+  if (!(await getAdminClaims())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { key } = await context.params;
+  const decodedKey = decodeURIComponent(key);
+  if (!ALLOWED_KEYS.has(decodedKey)) return NextResponse.json({ error: "不允许编辑此配置项" }, { status: 403 });
   const body = await request.json();
-  const { value } = body;
-
-  const admin = createAdminClient();
-
-  // 确认该 key 存在且 editable=true
-  const { data: setting, error: fetchErr } = await admin
-    .from("site_settings")
-    .select("editable, value_type")
-    .eq("key", key)
-    .single();
-
-  if (fetchErr || !setting) return NextResponse.json({ error: "设置项不存在" }, { status: 404 });
-  if (!setting.editable) return NextResponse.json({ error: "该设置项不可编辑" }, { status: 403 });
-
-  // secret 类型：空值提交视为「不修改」，保留原值
-  if (setting.value_type === "secret" && !String(value)) {
-    return NextResponse.json({ ok: true });
-  }
-
-  const { error } = await admin.from("site_settings").update({ value: String(value) }).eq("key", key);
+  if (body.value === undefined || body.value === null) return NextResponse.json({ error: "value 必填" }, { status: 400 });
+  const { error } = await createAdminClient().from("site_settings").upsert({ key: decodedKey, value: String(body.value) }, { onConflict: "key" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  // 更新后端缓存
   await refreshSiteSettings({ force: true });
-
   return NextResponse.json({ ok: true });
 }

@@ -7,8 +7,6 @@ interface RouteContext {
   params: Promise<{ groupName: string }>;
 }
 
-export const revalidate = 0;
-export const dynamic = "force-dynamic";
 
 /** 数据变化周期：5 分钟 */
 const DATA_CHANGE_CYCLE_SECONDS = 5 * 60;

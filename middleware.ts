@@ -1,8 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+
 import { checkRateLimit, DASHBOARD_RATE_LIMIT } from "@/lib/utils/rate-limiter";
 
-/** 获取客户端真实 IP（兼容常见反代头） */
 function getClientIp(request: NextRequest): string {
   return (
     request.headers.get("x-real-ip") ??
@@ -11,83 +11,83 @@ function getClientIp(request: NextRequest): string {
   );
 }
 
-/** 公开 Dashboard API 限速（无需认证的只读接口） */
-function applyDashboardRateLimit(request: NextRequest): NextResponse | null {
-  const ip = getClientIp(request);
-  const { pathname } = request.nextUrl;
-
-  // 按路由分别计数，互不干扰
-  const route = pathname.startsWith("/api/group/") ? "group" : "dashboard";
-  const { allowed, remaining, resetMs } = checkRateLimit(ip, route, DASHBOARD_RATE_LIMIT);
-
+function applyDashboardRateLimit(request: NextRequest): NextResponse {
+  const route = request.nextUrl.pathname.startsWith("/api/group/")
+    ? "group"
+    : "dashboard";
+  const result = checkRateLimit(
+    getClientIp(request),
+    route,
+    DASHBOARD_RATE_LIMIT
+  );
   const headers = {
     "X-RateLimit-Limit": String(DASHBOARD_RATE_LIMIT.maxRequests),
-    "X-RateLimit-Remaining": String(remaining),
-    "X-RateLimit-Reset": String(Math.ceil(resetMs / 1000)),
+    "X-RateLimit-Remaining": String(result.remaining),
+    "X-RateLimit-Reset": String(Math.ceil(result.resetMs / 1000)),
   };
 
-  if (!allowed) {
+  if (!result.allowed) {
     return NextResponse.json(
       { error: "Too Many Requests" },
       {
         status: 429,
         headers: {
           ...headers,
-          "Retry-After": String(Math.ceil(resetMs / 1000)),
+          "Retry-After": String(Math.ceil(result.resetMs / 1000)),
         },
       }
     );
   }
 
-  // 放行，并在响应头附上限速信息
   const response = NextResponse.next({ request });
-  Object.entries(headers).forEach(([k, v]) => response.headers.set(k, v));
+  for (const [key, value] of Object.entries(headers)) {
+    response.headers.set(key, value);
+  }
   return response;
 }
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  // 公开 API：仅限速，不验证身份
-  if (pathname === "/api/dashboard" || pathname.startsWith("/api/group/")) {
+  if (
+    request.nextUrl.pathname === "/api/dashboard" ||
+    request.nextUrl.pathname.startsWith("/api/group/")
+  ) {
     return applyDashboardRateLimit(request);
   }
 
-  // 管理后台登录页：直接放行
-  if (pathname === "/admin/login") return NextResponse.next();
-
-  // 管理后台 & 管理 API：验证 Supabase session
-  let response = NextResponse.next({ request });
-
+  const response = NextResponse.next({ request });
   const supabase = createServerClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_PUBLISHABLE_OR_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
+        getAll: () => request.cookies.getAll(),
+        setAll(cookies) {
+          cookies.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value);
+            response.cookies.set(name, value, options);
+          });
         },
       },
     }
   );
 
   const { data } = await supabase.auth.getClaims();
-  if (!data?.claims) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/admin/login";
-    return NextResponse.redirect(url);
+  if (data?.claims) {
+    return response;
   }
 
-  return response;
+  if (request.nextUrl.pathname === "/admin/login") {
+    return response;
+  }
+
+  if (request.nextUrl.pathname.startsWith("/api/admin/")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/admin/login";
+  loginUrl.searchParams.set("next", request.nextUrl.pathname);
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {

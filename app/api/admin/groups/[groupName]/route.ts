@@ -1,29 +1,30 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+
+import { getAdminClaims } from "@/lib/admin/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-async function requireAuth() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  return data?.claims ?? null;
-}
+interface Context { params: Promise<{ groupName: string }> }
+async function authenticated() { return Boolean(await getAdminClaims()); }
 
-export async function PUT(request: NextRequest, { params }: { params: Promise<{ groupName: string }> }) {
-  if (!(await requireAuth())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { groupName } = await params;
+export async function PUT(request: NextRequest, context: Context) {
+  if (!(await authenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { groupName } = await context.params;
   const body = await request.json();
-  const { display_name, description, website_url, icon_url } = body;
-  const admin = createAdminClient();
-  const { error } = await admin.from("group_info").update({ display_name: display_name || null, description: description || null, website_url: website_url || null, icon_url: icon_url || null }).eq("group_name", decodeURIComponent(groupName));
+  const { error } = await createAdminClient().from("group_info").update({
+    display_name: body.display_name ? String(body.display_name).trim() : null,
+    description: body.description ? String(body.description).trim() : null,
+    website_url: body.website_url ? String(body.website_url).trim() : null,
+    icon_url: body.icon_url ? String(body.icon_url).trim() : null,
+    tags: body.tags ? String(body.tags).trim() : "",
+  }).eq("group_name", decodeURIComponent(groupName));
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ groupName: string }> }) {
-  if (!(await requireAuth())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { groupName } = await params;
-  const admin = createAdminClient();
-  const { error } = await admin.from("group_info").delete().eq("group_name", decodeURIComponent(groupName));
+export async function DELETE(_: NextRequest, context: Context) {
+  if (!(await authenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { groupName } = await context.params;
+  const { error } = await createAdminClient().from("group_info").delete().eq("group_name", decodeURIComponent(groupName));
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

@@ -6,6 +6,7 @@ import "server-only";
 import {createAdminClient} from "../supabase/admin";
 import {getPollingIntervalMs} from "../core/polling-config";
 import type {CheckConfigRow, ProviderConfig, ProviderType} from "../types";
+import type {CheckModelRow, CheckRequestTemplateRow} from "../types/database";
 import {logError} from "../utils";
 
 interface ConfigCache {
@@ -17,6 +18,30 @@ interface ConfigCacheMetrics {
   hits: number;
   misses: number;
 }
+
+type JsonRecord = Record<string, unknown>;
+type TemplateProjection = Pick<CheckRequestTemplateRow, "type" | "request_header" | "metadata">;
+type ModelProjection = Pick<CheckModelRow, "id" | "type" | "model" | "template_id"> & {
+  check_request_templates?: TemplateProjection | TemplateProjection[] | null;
+};
+type ConfigRowWithModel = Pick<
+  CheckConfigRow,
+  | "id"
+  | "name"
+  | "type"
+  | "model_id"
+  | "model"
+  | "endpoint"
+  | "api_key"
+  | "is_maintenance"
+  | "group_name"
+  | "request_header"
+  | "metadata"
+  | "stream_mode"
+> & {
+  check_models?: ModelProjection | ModelProjection[] | null;
+  config_template?: TemplateProjection | TemplateProjection[] | null;
+};
 
 const cache: ConfigCache = {
   data: [],
@@ -35,6 +60,71 @@ export function getConfigCacheMetrics(): ConfigCacheMetrics {
 export function resetConfigCacheMetrics(): void {
   metrics.hits = 0;
   metrics.misses = 0;
+}
+
+function normalizeJsonRecord(value: unknown): JsonRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as JsonRecord;
+}
+
+function getModel(row: ConfigRowWithModel): ModelProjection | null {
+  const model = Array.isArray(row.check_models)
+    ? row.check_models[0]
+    : row.check_models;
+
+  if (!model || model.type !== row.type) {
+    return null;
+  }
+
+  return model;
+}
+
+function getTemplateFromModel(row: ConfigRowWithModel): TemplateProjection | null {
+  const model = getModel(row);
+  const template = Array.isArray(model?.check_request_templates)
+    ? model.check_request_templates[0]
+    : model?.check_request_templates;
+
+  if (!template || template.type !== row.type) {
+    return null;
+  }
+
+  return template;
+}
+
+function getTemplateFromConfig(row: ConfigRowWithModel): TemplateProjection | null {
+  const template = Array.isArray(row.config_template)
+    ? row.config_template[0]
+    : row.config_template;
+
+  if (!template || template.type !== row.type) {
+    return null;
+  }
+
+  return template;
+}
+
+function mergeJsonRecords(...values: unknown[]): JsonRecord | null {
+  const merged = Object.assign(
+    {},
+    ...values.map(normalizeJsonRecord).filter((value): value is JsonRecord => value !== null)
+  );
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function toHeaderRecord(value: JsonRecord | null): Record<string, string> | null {
+  if (!value) {
+    return null;
+  }
+
+  const headers = Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string"
+    )
+  );
+  return Object.keys(headers).length > 0 ? headers : null;
 }
 
 /**
@@ -56,7 +146,9 @@ export async function loadProviderConfigsFromDB(options?: {
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("check_configs")
-      .select("id, name, type, model, endpoint, api_key, is_maintenance, request_header, metadata, group_name, stream_mode")
+      .select(
+        "id, name, type, model_id, model, endpoint, api_key, is_maintenance, group_name, request_header, metadata, stream_mode, config_template:check_request_templates(type, request_header, metadata), check_models(id, type, model, template_id, check_request_templates(type, request_header, metadata))"
+      )
       .eq("enabled", true)
       .order("id");
 
@@ -73,19 +165,37 @@ export async function loadProviderConfigsFromDB(options?: {
     }
 
     const configs: ProviderConfig[] = data.map(
-      (row: Pick<CheckConfigRow, "id" | "name" | "type" | "model" | "endpoint" | "api_key" | "is_maintenance" | "request_header" | "metadata" | "group_name" | "stream_mode">) => ({
-        id: row.id,
-        name: row.name,
-        type: row.type as ProviderType,
-        endpoint: row.endpoint,
-        model: row.model,
-        apiKey: row.api_key,
-        is_maintenance: row.is_maintenance,
-        requestHeaders: row.request_header || null,
-        metadata: row.metadata || null,
-        groupName: row.group_name || null,
-        streamMode: row.stream_mode || null,
-      })
+      (row: ConfigRowWithModel) => {
+        const model = getModel(row);
+        const modelTemplate = getTemplateFromModel(row);
+        const configTemplate = getTemplateFromConfig(row);
+        const mergedRequestHeaders = toHeaderRecord(
+          mergeJsonRecords(
+            modelTemplate?.request_header,
+            configTemplate?.request_header,
+            row.request_header
+          )
+        );
+        const mergedMetadata = mergeJsonRecords(
+          modelTemplate?.metadata,
+          configTemplate?.metadata,
+          row.metadata
+        );
+
+        return {
+          id: row.id,
+          name: row.name,
+          type: row.type as ProviderType,
+          endpoint: row.endpoint,
+          model: model?.model ?? row.model ?? "",
+          apiKey: row.api_key,
+          is_maintenance: row.is_maintenance,
+          requestHeaders: mergedRequestHeaders,
+          metadata: mergedMetadata,
+          groupName: row.group_name || null,
+          streamMode: row.stream_mode || "stream",
+        };
+      }
     );
 
     cache.data = configs;

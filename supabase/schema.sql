@@ -7,25 +7,68 @@
 -- 1. 枚举类型
 -- -----------------------------------------------------------------------------
 
-CREATE TYPE public.provider_type AS ENUM ('openai', 'gemini', 'anthropic', 'grok');
+CREATE TYPE public.provider_type AS ENUM ('openai', 'gemini', 'anthropic');
 
 -- -----------------------------------------------------------------------------
 -- 2. 表结构
 -- -----------------------------------------------------------------------------
+
+-- 请求模板表：存储可复用的请求头与 metadata 默认值
+CREATE TABLE public.check_request_templates (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            text NOT NULL UNIQUE,
+    type            public.provider_type NOT NULL,
+    request_header  jsonb,
+    metadata        jsonb,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now()
+);
+
+COMMENT ON TABLE public.check_request_templates IS '请求模板表，提供可复用的请求头和 metadata 默认值';
+COMMENT ON COLUMN public.check_request_templates.id IS '模板 UUID';
+COMMENT ON COLUMN public.check_request_templates.name IS '模板名称（唯一）';
+COMMENT ON COLUMN public.check_request_templates.type IS '模板提供商类型: openai, gemini, anthropic，必须与 check_models.type 一致';
+COMMENT ON COLUMN public.check_request_templates.request_header IS '模板默认请求头 (JSONB)';
+COMMENT ON COLUMN public.check_request_templates.metadata IS '模板默认 metadata，请求体参数 (JSONB)';
+COMMENT ON COLUMN public.check_request_templates.created_at IS '创建时间';
+COMMENT ON COLUMN public.check_request_templates.updated_at IS '更新时间';
+
+-- 模型配置表：存储可复用的模型定义与模板绑定
+CREATE TABLE public.check_models (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    type            public.provider_type NOT NULL,
+    model           text NOT NULL,
+    template_id     uuid REFERENCES public.check_request_templates(id) ON DELETE SET NULL,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now(),
+
+    CONSTRAINT check_models_type_model_key UNIQUE (type, model)
+);
+
+COMMENT ON TABLE public.check_models IS '模型配置表，存储可复用的模型定义与模板绑定';
+COMMENT ON COLUMN public.check_models.id IS '模型 UUID';
+COMMENT ON COLUMN public.check_models.type IS '模型提供商类型: openai, gemini, anthropic';
+COMMENT ON COLUMN public.check_models.model IS '模型名称，如 gpt-4o-mini';
+COMMENT ON COLUMN public.check_models.template_id IS '请求模板 ID，关联 check_request_templates.id';
+COMMENT ON COLUMN public.check_models.created_at IS '创建时间';
+COMMENT ON COLUMN public.check_models.updated_at IS '更新时间';
 
 -- 配置表：存储 AI 服务商的 API 配置
 CREATE TABLE public.check_configs (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name            text NOT NULL,
     type            public.provider_type NOT NULL,
-    model           text NOT NULL,
+    model_id        uuid NOT NULL REFERENCES public.check_models(id) ON DELETE RESTRICT,
+    model           text,
+    template_id     uuid REFERENCES public.check_request_templates(id) ON DELETE SET NULL,
     endpoint        text NOT NULL,
     api_key         text NOT NULL,
     enabled         boolean DEFAULT true,
     is_maintenance  boolean DEFAULT false,
-    request_header  jsonb,
     group_name      text,
+    request_header  jsonb,
     metadata        jsonb,
+    stream_mode     text NOT NULL DEFAULT 'stream' CHECK (stream_mode IN ('stream', 'generate')),
     created_at      timestamptz DEFAULT now(),
     updated_at      timestamptz DEFAULT now()
 );
@@ -34,14 +77,12 @@ COMMENT ON TABLE public.check_configs IS 'AI 服务商配置表';
 COMMENT ON COLUMN public.check_configs.id IS '配置 UUID';
 COMMENT ON COLUMN public.check_configs.name IS '配置显示名称';
 COMMENT ON COLUMN public.check_configs.type IS '提供商类型: openai, gemini, anthropic';
-COMMENT ON COLUMN public.check_configs.model IS '模型名称，如 gpt-4o-mini';
+COMMENT ON COLUMN public.check_configs.model_id IS '模型 ID，关联 check_models.id';
 COMMENT ON COLUMN public.check_configs.endpoint IS 'API 端点 URL';
 COMMENT ON COLUMN public.check_configs.api_key IS 'API 密钥';
 COMMENT ON COLUMN public.check_configs.enabled IS '是否启用检测';
 COMMENT ON COLUMN public.check_configs.is_maintenance IS '维护模式，true 时停止检查';
-COMMENT ON COLUMN public.check_configs.request_header IS '自定义请求头 (JSONB)';
 COMMENT ON COLUMN public.check_configs.group_name IS '分组名称，用于 Dashboard 分组展示';
-COMMENT ON COLUMN public.check_configs.metadata IS '自定义请求参数，合并到请求体 (JSONB)';
 COMMENT ON COLUMN public.check_configs.created_at IS '创建时间';
 COMMENT ON COLUMN public.check_configs.updated_at IS '更新时间';
 
@@ -70,14 +111,40 @@ COMMENT ON COLUMN public.check_history.checked_at IS '检测时间';
 COMMENT ON COLUMN public.check_history.message IS '状态消息或错误信息';
 COMMENT ON COLUMN public.check_history.created_at IS '记录创建时间';
 
+-- 挑战记录表：存储每次健康检查的挑战-验证结果（含不计入健康状态的高难度题）
+CREATE TABLE public.check_challenges (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    config_id uuid NOT NULL REFERENCES public.check_configs(id) ON DELETE CASCADE,
+    difficulty smallint NOT NULL,
+    category text NOT NULL,
+    expected_answer text NOT NULL,
+    response_excerpt text,
+    passed boolean NOT NULL,
+    latency_ms integer,
+    checked_at timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT check_challenges_difficulty_valid CHECK (difficulty BETWEEN 1 AND 5)
+);
+
+COMMENT ON TABLE public.check_challenges IS '模型能力评估挑战记录（难度 1/2 同时用于健康判定，3-5 仅用于能力评估）';
+COMMENT ON COLUMN public.check_challenges.id IS '记录 ID';
+COMMENT ON COLUMN public.check_challenges.config_id IS '关联的配置 ID';
+COMMENT ON COLUMN public.check_challenges.difficulty IS '难度档 1-5';
+COMMENT ON COLUMN public.check_challenges.category IS '题型：category_select / reading_comprehension / state_tracking / logical_implication / instruction_following';
+COMMENT ON COLUMN public.check_challenges.expected_answer IS '期望答案（归一化后比较）';
+COMMENT ON COLUMN public.check_challenges.response_excerpt IS '模型回复摘要（已截断），失败时用于排查';
+COMMENT ON COLUMN public.check_challenges.passed IS '是否通过验证';
+COMMENT ON COLUMN public.check_challenges.latency_ms IS '响应延迟 (毫秒)';
+COMMENT ON COLUMN public.check_challenges.checked_at IS '检测时间';
+
 -- 分组信息表：存储分组的额外信息
 CREATE TABLE public.group_info (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     group_name  text NOT NULL UNIQUE,
     display_name text,
-    description  text,
-    website_url  text,
-    icon_url     text,
+    description text,
+    website_url text,
+    icon_url    text,
     tags        text NOT NULL DEFAULT '',
     created_at  timestamptz DEFAULT now(),
     updated_at  timestamptz DEFAULT now()
@@ -88,15 +155,44 @@ COMMENT ON COLUMN public.group_info.group_name IS '分组名称，关联 check_c
 COMMENT ON COLUMN public.group_info.website_url IS '网站地址';
 COMMENT ON COLUMN public.group_info.tags IS '分组 Tag 列表，英文逗号分隔字符串';
 
+-- 后台用户目录表：存储邀请制用户、角色与预设分组
+CREATE TABLE public.admin_users (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    email           text NOT NULL,
+    role            text NOT NULL,
+    group_name      text,
+    auth_user_id    uuid,
+    invited_by      uuid REFERENCES public.admin_users(id) ON DELETE SET NULL,
+    is_active       boolean DEFAULT true,
+    invited_at      timestamptz DEFAULT now(),
+    activated_at    timestamptz,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now(),
+
+    CONSTRAINT admin_users_email_key UNIQUE (email),
+    CONSTRAINT admin_users_auth_user_id_key UNIQUE (auth_user_id),
+    CONSTRAINT admin_users_role_check CHECK (role IN ('admin', 'member')),
+    CONSTRAINT admin_users_member_group_check CHECK (
+        role = 'admin' OR (group_name IS NOT NULL AND btrim(group_name) <> '')
+    )
+);
+
+COMMENT ON TABLE public.admin_users IS '后台用户目录表，存储邀请用户、角色和预设分组';
+COMMENT ON COLUMN public.admin_users.email IS '登录邮箱，统一使用小写';
+COMMENT ON COLUMN public.admin_users.role IS '后台角色：admin 或 member';
+COMMENT ON COLUMN public.admin_users.group_name IS '成员预设分组名；管理员可为空';
+COMMENT ON COLUMN public.admin_users.auth_user_id IS '首次登录后绑定的 Supabase Auth 用户 ID';
+COMMENT ON COLUMN public.admin_users.invited_by IS '邀请人，对应 admin_users.id';
+COMMENT ON COLUMN public.admin_users.is_active IS '是否启用该后台用户';
+COMMENT ON COLUMN public.admin_users.invited_at IS '邀请写入时间';
+COMMENT ON COLUMN public.admin_users.activated_at IS '首次成功登录激活时间';
+
 -- 系统通知表：存储全局系统通知
 CREATE TABLE public.system_notifications (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     message     text NOT NULL,
     is_active   boolean DEFAULT true,
     level       text DEFAULT 'info',
-    scope       text NOT NULL DEFAULT 'public' CHECK (scope IN ('public', 'admin', 'both')),
-    start_time  timestamptz,
-    end_time    timestamptz,
     created_at  timestamptz DEFAULT now()
 );
 
@@ -106,6 +202,41 @@ COMMENT ON COLUMN public.system_notifications.message IS '通知内容，支持 
 COMMENT ON COLUMN public.system_notifications.is_active IS '是否激活，true 为显示';
 COMMENT ON COLUMN public.system_notifications.level IS '通知级别：info, warning, error';
 COMMENT ON COLUMN public.system_notifications.created_at IS '创建时间';
+
+-- 运行时站点设置，保留本地部署的动态轮询与站点元数据能力
+CREATE TABLE public.site_settings (
+    key         text PRIMARY KEY,
+    value       text,
+    description text,
+    editable    boolean NOT NULL DEFAULT true,
+    value_type  text NOT NULL DEFAULT 'string'
+);
+
+INSERT INTO public.site_settings (key, value, description, editable, value_type) VALUES
+    ('check_poll_interval_seconds', '60', '轮询间隔（秒）', true, 'number'),
+    ('degraded_threshold_ms', '6000', '延迟超过此值判定为降级（毫秒）', true, 'number'),
+    ('max_concurrency', '5', '并发检测任务上限（1-20）', true, 'number'),
+    ('history_retention_count', '60', '每个配置最多保留历史条数', true, 'number'),
+    ('site.title', 'Check CX - AI 模型健康监控', '站点标题', true, 'string'),
+    ('site.description', '实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟', '站点描述', true, 'string'),
+    ('site.logo_url', '/favicon.png', 'Logo 图片 URL', true, 'string'),
+    ('site.favicon_url', '/favicon.png', 'Favicon URL', true, 'string')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE public.scheduler_tokens (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          text NOT NULL,
+    token_hash    text NOT NULL UNIQUE,
+    token_prefix  text NOT NULL,
+    scope         text NOT NULL DEFAULT 'checks:run',
+    enabled       boolean NOT NULL DEFAULT true,
+    last_used_at  timestamptz,
+    expires_at    timestamptz,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_scheduler_tokens_enabled ON public.scheduler_tokens (enabled, created_at DESC);
 
 -- 轮询主节点租约表（单行租约）
 CREATE TABLE public.check_poller_leases (
@@ -121,47 +252,6 @@ INSERT INTO public.check_poller_leases (lease_key, leader_id, lease_expires_at)
 VALUES ('poller', NULL, to_timestamp(0))
 ON CONFLICT (lease_key) DO NOTHING;
 
--- 系统设置表：可运行时配置的 key-value 参数
-CREATE TABLE public.site_settings (
-    key          text PRIMARY KEY,
-    value        text,
-    description  text,
-    editable     boolean NOT NULL DEFAULT true,
-    value_type   text NOT NULL DEFAULT 'string'
-);
-
-COMMENT ON TABLE public.site_settings IS '系统运行时设置表，部分字段可在管理后台编辑';
-
-INSERT INTO public.site_settings (key, value, description, editable, value_type) VALUES
-    ('check_poll_interval_seconds', '60',   '检测轮询间隔（秒），重启后生效', true,  'number'),
-    ('degraded_threshold_ms',       '6000', '延迟超过此值判定为降级（毫秒）', true,  'number'),
-    ('max_concurrency',             '5',    '并发检测任务上限（1–20）',        true,  'number'),
-    ('history_retention_count',     '60',   '每个配置最多保留历史条数',        true,  'number')
-ON CONFLICT (key) DO NOTHING;
-
--- 外部调度 Token 表
-CREATE TABLE public.scheduler_tokens (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text NOT NULL,
-    token_hash text NOT NULL UNIQUE,
-    token_prefix text NOT NULL,
-    scope text NOT NULL DEFAULT 'checks:run',
-    enabled boolean NOT NULL DEFAULT true,
-    last_used_at timestamptz,
-    expires_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE public.scheduler_tokens IS '外部调度调用专用 API Token 表';
-COMMENT ON COLUMN public.scheduler_tokens.name IS 'Token 名称，用于区分调用方';
-COMMENT ON COLUMN public.scheduler_tokens.token_hash IS 'Token 的 SHA-256 哈希，不存储明文';
-COMMENT ON COLUMN public.scheduler_tokens.token_prefix IS 'Token 前缀，用于后台识别';
-COMMENT ON COLUMN public.scheduler_tokens.scope IS 'Token 权限范围，当前固定 checks:run';
-COMMENT ON COLUMN public.scheduler_tokens.enabled IS '是否启用';
-COMMENT ON COLUMN public.scheduler_tokens.last_used_at IS '最近使用时间';
-COMMENT ON COLUMN public.scheduler_tokens.expires_at IS '过期时间，为空表示不过期';
-
 -- -----------------------------------------------------------------------------
 -- 3. 索引
 -- -----------------------------------------------------------------------------
@@ -169,7 +259,10 @@ COMMENT ON COLUMN public.scheduler_tokens.expires_at IS '过期时间，为空�
 CREATE INDEX idx_check_history_config_id ON public.check_history (config_id);
 CREATE INDEX idx_check_history_checked_at ON public.check_history (checked_at DESC);
 CREATE INDEX idx_history_config_checked ON public.check_history (config_id, checked_at DESC);
-CREATE INDEX idx_scheduler_tokens_enabled ON public.scheduler_tokens (enabled, created_at DESC);
+CREATE INDEX idx_challenges_config_checked ON public.check_challenges (config_id, checked_at DESC);
+CREATE INDEX idx_check_configs_model_id ON public.check_configs (model_id);
+CREATE INDEX idx_check_models_template_id ON public.check_models (template_id);
+CREATE INDEX idx_admin_users_role_group ON public.admin_users (role, group_name);
 
 -- -----------------------------------------------------------------------------
 -- 4. 视图
@@ -180,8 +273,8 @@ SELECT
     config_id,
     '7d'::text AS period,
     COUNT(*) AS total_checks,
-    COUNT(*) FILTER (WHERE status = 'operational') AS operational_count,
-    ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+    COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) AS operational_count,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) / NULLIF(COUNT(*), 0), 2) AS availability_pct
 FROM public.check_history
 WHERE checked_at > NOW() - INTERVAL '7 days'
 GROUP BY config_id
@@ -192,8 +285,8 @@ SELECT
     config_id,
     '15d'::text AS period,
     COUNT(*) AS total_checks,
-    COUNT(*) FILTER (WHERE status = 'operational') AS operational_count,
-    ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+    COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) AS operational_count,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) / NULLIF(COUNT(*), 0), 2) AS availability_pct
 FROM public.check_history
 WHERE checked_at > NOW() - INTERVAL '15 days'
 GROUP BY config_id
@@ -204,13 +297,61 @@ SELECT
     config_id,
     '30d'::text AS period,
     COUNT(*) AS total_checks,
-    COUNT(*) FILTER (WHERE status = 'operational') AS operational_count,
-    ROUND(100.0 * COUNT(*) FILTER (WHERE status = 'operational') / NULLIF(COUNT(*), 0), 2) AS availability_pct
+    COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) AS operational_count,
+    ROUND(100.0 * COUNT(*) FILTER (WHERE status IN ('operational', 'degraded')) / NULLIF(COUNT(*), 0), 2) AS availability_pct
 FROM public.check_history
 WHERE checked_at > NOW() - INTERVAL '30 days'
 GROUP BY config_id;
 
-COMMENT ON VIEW public.availability_stats IS '可用性统计视图，提供 7天/15天/30天 的可用性百分比';
+COMMENT ON VIEW public.availability_stats IS '可用性统计视图，提供 7天/15天/30天 的可用性百分比（operational + degraded 视为可用）';
+
+-- 智力统计视图：近 30 天按难度档通过率 + 加权总分
+-- 权重 1/2/4/8/16 随难度递增；样本 < 5 的难度档 pass_rate 记 NULL 且不计入总分
+CREATE OR REPLACE VIEW public.intelligence_stats AS
+WITH agg AS (
+    SELECT
+        config_id,
+        difficulty,
+        COUNT(*) AS samples,
+        COUNT(*) FILTER (WHERE passed) AS passed_count
+    FROM public.check_challenges
+    WHERE checked_at > NOW() - INTERVAL '30 days'
+    GROUP BY config_id, difficulty
+),
+scored AS (
+    SELECT
+        config_id,
+        difficulty,
+        samples,
+        passed_count,
+        CASE WHEN samples >= 5
+             THEN ROUND(100.0 * passed_count / samples, 2)
+        END AS pass_rate,
+        CASE difficulty
+            WHEN 1 THEN 1
+            WHEN 2 THEN 2
+            WHEN 3 THEN 4
+            WHEN 4 THEN 8
+            WHEN 5 THEN 16
+        END AS weight
+    FROM agg
+)
+SELECT
+    config_id,
+    SUM(samples) AS total_samples,
+    MAX(pass_rate) FILTER (WHERE difficulty = 1) AS d1_pass_rate,
+    MAX(pass_rate) FILTER (WHERE difficulty = 2) AS d2_pass_rate,
+    MAX(pass_rate) FILTER (WHERE difficulty = 3) AS d3_pass_rate,
+    MAX(pass_rate) FILTER (WHERE difficulty = 4) AS d4_pass_rate,
+    MAX(pass_rate) FILTER (WHERE difficulty = 5) AS d5_pass_rate,
+    ROUND(100.0 *
+          SUM(CASE WHEN samples >= 5 THEN weight * passed_count ELSE 0 END)
+        / NULLIF(SUM(CASE WHEN samples >= 5 THEN weight * samples ELSE 0 END), 0), 2
+    ) AS total_score
+FROM scored
+GROUP BY config_id;
+
+COMMENT ON VIEW public.intelligence_stats IS '近30天模型能力评估：按难度档通过率与加权总分（权重 1/2/4/8/16，样本 <5 的难度档不计入总分）';
 
 -- -----------------------------------------------------------------------------
 -- 5. 触发器函数
@@ -226,6 +367,58 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.validate_check_model_template_type()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    template_type public.provider_type;
+BEGIN
+    IF NEW.template_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT type
+    INTO template_type
+    FROM public.check_request_templates
+    WHERE id = NEW.template_id;
+
+    IF template_type IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF template_type <> NEW.type THEN
+        RAISE EXCEPTION '模板类型不匹配: model.type=%, template.type=%', NEW.type, template_type;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.validate_check_config_model_type()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    linked_model_type public.provider_type;
+BEGIN
+    SELECT type
+    INTO linked_model_type
+    FROM public.check_models
+    WHERE id = NEW.model_id;
+
+    IF linked_model_type IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF linked_model_type <> NEW.type THEN
+        RAISE EXCEPTION '模型类型不匹配: config.type=%, model.type=%', NEW.type, linked_model_type;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- 6. 触发器
 -- -----------------------------------------------------------------------------
@@ -235,13 +428,33 @@ CREATE TRIGGER update_check_configs_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
+CREATE TRIGGER validate_check_models_template_type
+    BEFORE INSERT OR UPDATE OF template_id, type ON public.check_models
+    FOR EACH ROW
+    EXECUTE FUNCTION public.validate_check_model_template_type();
+
+CREATE TRIGGER validate_check_configs_model_type
+    BEFORE INSERT OR UPDATE OF model_id, type ON public.check_configs
+    FOR EACH ROW
+    EXECUTE FUNCTION public.validate_check_config_model_type();
+
+CREATE TRIGGER update_check_models_updated_at
+    BEFORE UPDATE ON public.check_models
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER update_check_request_templates_updated_at
+    BEFORE UPDATE ON public.check_request_templates
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
 CREATE TRIGGER update_group_info_updated_at
     BEFORE UPDATE ON public.group_info
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
-CREATE TRIGGER update_scheduler_tokens_updated_at
-    BEFORE UPDATE ON public.scheduler_tokens
+CREATE TRIGGER update_admin_users_updated_at
+    BEFORE UPDATE ON public.admin_users
     FOR EACH ROW
     EXECUTE FUNCTION public.update_updated_at_column();
 
@@ -250,11 +463,14 @@ CREATE TRIGGER update_scheduler_tokens_updated_at
 -- -----------------------------------------------------------------------------
 
 ALTER TABLE public.check_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.check_models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.check_request_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.check_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_info ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.check_poller_leases ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.scheduler_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.check_challenges ENABLE ROW LEVEL SECURITY;
 
 -- check_history: 允许匿名用户读取
 CREATE POLICY allow_anon_select_history
@@ -324,16 +540,17 @@ AS $$
         r.message,
         c.name,
         c.type::text,
-        c.model,
+        m.model,
         c.endpoint,
         c.group_name
     FROM ranked r
     JOIN check_configs c ON c.id = r.config_id
+    JOIN check_models m ON m.id = c.model_id
     WHERE r.rn <= limit_per_config
     ORDER BY c.name ASC, r.checked_at DESC;
 $$;
 
--- 清理过期的历史记录
+-- 清理过期的历史记录与挑战记录
 -- 先删除旧版本函数（单参数版本），避免函数重载冲突
 DROP FUNCTION IF EXISTS public.prune_check_history(integer);
 
@@ -348,6 +565,7 @@ AS $$
 DECLARE
     effective_days integer;
     deleted_count integer;
+    challenge_deleted integer;
 BEGIN
     effective_days := LEAST(365, GREATEST(7, COALESCE(retention_days, limit_per_config, 30)));
 
@@ -355,8 +573,13 @@ BEGIN
     WHERE checked_at < NOW() - (effective_days || ' days')::interval;
 
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
-    RETURN deleted_count;
+
+    DELETE FROM public.check_challenges
+    WHERE checked_at < NOW() - (effective_days || ' days')::interval;
+
+    GET DIAGNOSTICS challenge_deleted = ROW_COUNT;
+    RETURN deleted_count + challenge_deleted;
 END;
 $$;
 
-COMMENT ON FUNCTION public.prune_check_history IS '清理超过指定天数的历史记录，默认保留 30 天';
+COMMENT ON FUNCTION public.prune_check_history IS '清理超过指定天数的历史记录与挑战记录，默认保留 30 天';
