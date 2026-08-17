@@ -50,7 +50,12 @@ error.log
 .playwright-mcp
 .mcp.json
 
-
 # local agent workspaces
 .worktrees/
 .superpowers/
+/triggers/
+
+# openspec
+openspec/changes/*
+!openspec/changes/update-official-v1-23-11/
+!openspec/changes/update-official-v1-23-11/**
