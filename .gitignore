@@ -53,4 +53,6 @@ error.log
 .mcp.json
 
 # openspec
-openspec/changes/
+openspec/changes/*
+!openspec/changes/update-official-v1-23-11/
+!openspec/changes/update-official-v1-23-11/**
