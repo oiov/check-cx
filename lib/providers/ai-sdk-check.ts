@@ -18,7 +18,7 @@
  * - 端点 Ping 延迟测量
  */
 
-import { streamText } from "ai";
+import { generateText, streamText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
@@ -29,6 +29,7 @@ import { DEFAULT_ENDPOINTS } from "../types";
 import { getErrorMessage, getSanitizedErrorDetail } from "../utils";
 import { generateChallenge, validateResponse } from "./challenge";
 import { measureEndpointPing } from "./endpoint-ping";
+import { getSiteSettingSync } from "../core/site-settings";
 
 /* ============================================================================
  * 常量定义
@@ -38,7 +39,10 @@ import { measureEndpointPing } from "./endpoint-ping";
 const DEFAULT_TIMEOUT_MS = 45_000;
 
 /** 性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
-const DEGRADED_THRESHOLD_MS = 6_000;
+function getDegradedThresholdMs(): number {
+  const raw = Number(getSiteSettingSync("degraded_threshold_ms", "6000"));
+  return Number.isFinite(raw) && raw > 0 ? raw : 6_000;
+}
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
 const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
@@ -469,20 +473,29 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
 
     // 期望输出仅一个词：非推理模型锁死输出上限，省钱且防恶意端点猛吐输出刷成本。
     // 推理模型的隐藏推理会占用输出预算，故不限制以免被饿死。
-    const result = streamText({
+    let collectedResponse = "";
+
+    const generationOptions = {
       model,
       prompt: challenge.prompt,
       timeout: DEFAULT_TIMEOUT_MS,
       ...(reasoningEffort ? { reasoning: reasoningEffort } : { maxOutputTokens: 24 }),
-      onError({ error }) {
-        streamError = error as AIApiCallError;
-      },
-    });
+    };
 
-    // 收集完整响应
-    let collectedResponse = "";
-    for await (const chunk of result.textStream) {
-      collectedResponse += chunk;
+    if (config.streamMode === "generate") {
+      const result = await generateText(generationOptions);
+      collectedResponse = result.text;
+    } else {
+      const result = streamText({
+        ...generationOptions,
+        onError({ error }) {
+          streamError = error as AIApiCallError;
+        },
+      });
+
+      for await (const chunk of result.textStream) {
+        collectedResponse += chunk;
+      }
     }
 
     const latencyMs = Date.now() - startedAt;
@@ -530,7 +543,9 @@ export async function checkWithAiSdk(config: ProviderConfig): Promise<CheckResul
     }
 
     // 判定健康状态
-    const status: HealthStatus = latencyMs <= DEGRADED_THRESHOLD_MS ? "operational" : "degraded";
+    const status: HealthStatus = latencyMs <= getDegradedThresholdMs()
+      ? "operational"
+      : "degraded";
     const message = !valid
       ? `高难度题验证未通过（不计入健康状态）: 期望 "${challenge.expectedAnswer}" (${latencyMs}ms)`
       : status === "degraded"

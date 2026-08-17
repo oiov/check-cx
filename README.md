@@ -24,7 +24,7 @@ Dashboard 与只读状态 API，适用于团队内部状态展示、供应商 SL
 
 ### 1. 环境准备
 
-- Node.js 18 及以上版本（建议使用 20 LTS）
+- Node.js 22 及以上版本
 - pnpm 10
 - Supabase 项目（PostgreSQL）
 

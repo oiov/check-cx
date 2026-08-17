@@ -7,11 +7,25 @@ import type {PostgrestError} from "@supabase/supabase-js";
 import {createAdminClient} from "../supabase/admin";
 import type {CheckResult, HistorySnapshot} from "../types";
 import {logError} from "../utils";
+import { getSiteSettingSync } from "../core/site-settings";
 
 /**
  * 每个 Provider 最多保留的历史记录数
  */
 export const MAX_POINTS_PER_PROVIDER = 60;
+
+function getMaxPointsPerProvider(): number {
+  const raw = Number(
+    getSiteSettingSync(
+      "history_retention_count",
+      String(MAX_POINTS_PER_PROVIDER)
+    )
+  );
+  if (!Number.isFinite(raw)) {
+    return MAX_POINTS_PER_PROVIDER;
+  }
+  return Math.max(1, Math.min(1000, Math.trunc(raw)));
+}
 
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 7;
@@ -77,7 +91,7 @@ class SnapshotStore {
     }
 
     const supabase = createAdminClient();
-    const limitPerConfig = options?.limitPerConfig ?? MAX_POINTS_PER_PROVIDER;
+    const limitPerConfig = options?.limitPerConfig ?? getMaxPointsPerProvider();
     const { data, error } = await supabase.rpc(
       RPC_RECENT_HISTORY,
       {
@@ -202,7 +216,7 @@ function normalizeAllowedIds(
 
 function mapRowsToSnapshot(
   rows: RpcHistoryRow[] | null,
-  limitPerConfig: number = MAX_POINTS_PER_PROVIDER
+  limitPerConfig: number = getMaxPointsPerProvider()
 ): HistorySnapshot {
   if (!rows || rows.length === 0) {
     return {};
@@ -328,7 +342,7 @@ async function fallbackFetchSnapshot(
           (a, b) =>
             new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime()
         )
-        .slice(0, MAX_POINTS_PER_PROVIDER);
+        .slice(0, getMaxPointsPerProvider());
     }
 
     return history;

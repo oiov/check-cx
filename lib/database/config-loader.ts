@@ -26,9 +26,21 @@ type ModelProjection = Pick<CheckModelRow, "id" | "type" | "model" | "template_i
 };
 type ConfigRowWithModel = Pick<
   CheckConfigRow,
-  "id" | "name" | "type" | "model_id" | "endpoint" | "api_key" | "is_maintenance" | "group_name"
+  | "id"
+  | "name"
+  | "type"
+  | "model_id"
+  | "model"
+  | "endpoint"
+  | "api_key"
+  | "is_maintenance"
+  | "group_name"
+  | "request_header"
+  | "metadata"
+  | "stream_mode"
 > & {
   check_models?: ModelProjection | ModelProjection[] | null;
+  config_template?: TemplateProjection | TemplateProjection[] | null;
 };
 
 const cache: ConfigCache = {
@@ -82,6 +94,39 @@ function getTemplateFromModel(row: ConfigRowWithModel): TemplateProjection | nul
   return template;
 }
 
+function getTemplateFromConfig(row: ConfigRowWithModel): TemplateProjection | null {
+  const template = Array.isArray(row.config_template)
+    ? row.config_template[0]
+    : row.config_template;
+
+  if (!template || template.type !== row.type) {
+    return null;
+  }
+
+  return template;
+}
+
+function mergeJsonRecords(...values: unknown[]): JsonRecord | null {
+  const merged = Object.assign(
+    {},
+    ...values.map(normalizeJsonRecord).filter((value): value is JsonRecord => value !== null)
+  );
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
+function toHeaderRecord(value: JsonRecord | null): Record<string, string> | null {
+  if (!value) {
+    return null;
+  }
+
+  const headers = Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] =>
+      typeof entry[1] === "string"
+    )
+  );
+  return Object.keys(headers).length > 0 ? headers : null;
+}
+
 /**
  * 从数据库加载启用的 Provider 配置
  * @returns Provider 配置列表
@@ -102,7 +147,7 @@ export async function loadProviderConfigsFromDB(options?: {
     const { data, error } = await supabase
       .from("check_configs")
       .select(
-        "id, name, type, model_id, endpoint, api_key, is_maintenance, group_name, check_models(id, type, model, template_id, check_request_templates(type, request_header, metadata))"
+        "id, name, type, model_id, model, endpoint, api_key, is_maintenance, group_name, request_header, metadata, stream_mode, config_template:check_request_templates(type, request_header, metadata), check_models(id, type, model, template_id, check_request_templates(type, request_header, metadata))"
       )
       .eq("enabled", true)
       .order("id");
@@ -122,21 +167,33 @@ export async function loadProviderConfigsFromDB(options?: {
     const configs: ProviderConfig[] = data.map(
       (row: ConfigRowWithModel) => {
         const model = getModel(row);
-        const template = getTemplateFromModel(row);
-        const mergedRequestHeaders = normalizeJsonRecord(template?.request_header) as Record<string, string> | null;
-        const mergedMetadata = normalizeJsonRecord(template?.metadata);
+        const modelTemplate = getTemplateFromModel(row);
+        const configTemplate = getTemplateFromConfig(row);
+        const mergedRequestHeaders = toHeaderRecord(
+          mergeJsonRecords(
+            modelTemplate?.request_header,
+            configTemplate?.request_header,
+            row.request_header
+          )
+        );
+        const mergedMetadata = mergeJsonRecords(
+          modelTemplate?.metadata,
+          configTemplate?.metadata,
+          row.metadata
+        );
 
         return {
           id: row.id,
           name: row.name,
           type: row.type as ProviderType,
           endpoint: row.endpoint,
-          model: model?.model ?? "",
+          model: model?.model ?? row.model ?? "",
           apiKey: row.api_key,
           is_maintenance: row.is_maintenance,
           requestHeaders: mergedRequestHeaders,
           metadata: mergedMetadata,
           groupName: row.group_name || null,
+          streamMode: row.stream_mode || "stream",
         };
       }
     );

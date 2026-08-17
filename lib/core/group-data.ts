@@ -23,6 +23,10 @@ interface GroupDashboardCacheEntry {
 const DEFAULT_GROUP_CACHE_TTL_MS = 5 * 60 * 1000;
 const groupDashboardCache = new Map<string, GroupDashboardCacheEntry>();
 
+export function clearGroupDashboardCache(): void {
+  groupDashboardCache.clear();
+}
+
 function getGroupCacheKey(
   groupName: string,
   pollIntervalMs: number,
@@ -45,6 +49,7 @@ function getGroupCacheTtlMs(pollIntervalMs: number): number {
 export interface GroupDashboardData {
   groupName: string;
   displayName: string;
+  description?: string | null;
   tags: string;
   providerTimelines: ProviderTimeline[];
   lastUpdated: string | null;
@@ -164,11 +169,16 @@ export async function loadGroupDashboardData(
 
     // 分组信息（未分组时为 null）
     const websiteUrl = groupInfo?.website_url;
+    const displayName = isTargetUngrouped
+      ? UNGROUPED_DISPLAY_NAME
+      : groupInfo?.display_name || targetGroupName;
+    const description = groupInfo?.description ?? null;
     const tags = groupInfo?.tags ?? "";
 
     const data: GroupDashboardData = {
       groupName: targetGroupName,
-      displayName: isTargetUngrouped ? UNGROUPED_DISPLAY_NAME : targetGroupName,
+      displayName,
+      description,
       tags,
       providerTimelines,
       lastUpdated,

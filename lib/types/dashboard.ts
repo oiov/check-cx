@@ -17,6 +17,8 @@ export type AvailabilityStatsMap = Record<string, AvailabilityStat[]>;
 
 export interface GroupInfoSummary {
   groupName: string;
+  displayName?: string | null;
+  description?: string | null;
   websiteUrl?: string | null;
   tags: string;
 }

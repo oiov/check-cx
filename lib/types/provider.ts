@@ -21,6 +21,7 @@ export interface ProviderConfig {
   requestHeaders?: Record<string, string> | null;
   metadata?: Record<string, unknown> | null;
   groupName?: string | null;
+  streamMode?: "stream" | "generate" | null;
 }
 
 /**

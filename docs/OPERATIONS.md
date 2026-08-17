@@ -4,7 +4,7 @@
 
 ## 1. 运行环境
 
-- Node.js 18 及以上（建议 20 LTS）
+- Node.js 22 及以上
 - pnpm 10
 - Supabase（PostgreSQL）
 

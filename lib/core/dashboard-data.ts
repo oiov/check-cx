@@ -46,6 +46,10 @@ export function resetDashboardCacheMetrics(): void {
 const DEFAULT_DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
+export function clearDashboardDataCache(): void {
+  dashboardCache.clear();
+}
+
 function getDashboardCacheKey(
   pollIntervalMs: number,
   providerKey: string,
@@ -162,6 +166,8 @@ async function loadDashboardDataInternal(options?: {
     const generatedAt = Date.now();
     const groupInfoSummaries: GroupInfoSummary[] = groupInfos.map((info) => ({
       groupName: info.group_name,
+      displayName: info.display_name ?? info.group_name,
+      description: info.description ?? null,
       websiteUrl: info.website_url ?? null,
       tags: info.tags ?? "",
     }));

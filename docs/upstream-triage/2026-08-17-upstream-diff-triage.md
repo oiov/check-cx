@@ -2,9 +2,12 @@
 
 ## Baseline
 
-- Local branch: `master`
-- Local commit: `f5f60ef88172a3218cbbe8c375d8cde1785a7c63` (`upd`)
-- Local tracking ref: `origin/master` at the same commit
+- Current integration branch: `upgrade/official-v1.23.11`
+- Current committed head: `26eab2498f37e74cc1d9ac536f9b33bb6ce587b7` (`docs: propose official v1.23.11 upgrade`)
+- Integration base: official `a194519c2f632c39546b8548fccb6d1b3dea341c` / `v1.23.11`; `official/master` is an ancestor of the current branch.
+- Branch ancestry versus `official/master`: one local documentation commit ahead, zero upstream commits behind.
+- Original local comparison branch: `master` at `f5f60ef88172a3218cbbe8c375d8cde1785a7c63` (`upd`).
+- Local tracking ref: `origin/master` at `f5f60ef`.
 - Fork remote: `origin` -> `https://github.com/oiov/check-cx.git`
 - Upstream remote: `upstream` -> `https://github.com/h7ml/check-cx.git`
 - Upstream branch: `upstream/master`
@@ -17,6 +20,17 @@
 - Authoritative upstream commit date: 2026-08-10 10:55:46 +0800
 - Authoritative release: `v1.23.11`
 - Source-of-truth correction: `BingZi-233/check-cx` is the official project; `h7ml/check-cx` is a modified downstream and must remain a separate comparison source.
+- Latest fetch check: `git fetch official --tags --prune` on 2026-08-17 left `official/master` unchanged at `a194519`.
+
+## Integration Status
+
+- Decision: do not direct-merge either diverged fork. The working branch is already a clean official `v1.23.11` snapshot with only deployed compatibility behavior forward-ported.
+- Application compatibility is implemented for site settings, group display metadata, scheduler tokens, config-level request metadata, `stream_mode=generate`, dynamic polling settings, and the existing public API rate limits.
+- The root layout no longer starts the poller during prerender. `instrumentation.ts` is the single standalone startup path, preventing build workers from issuing model checks.
+- `pnpm install --frozen-lockfile`, TypeScript, lint, `git diff --check`, and `pnpm build` pass. Lint retains one pre-existing warning in ignored local `triggers/worker.js`.
+- The production database migration was rehearsed in one transaction and rolled back. Post-rollback state remained 44 configs, 7,908 history rows, 10 groups, 12 site settings, and 3 scheduler tokens; `check_models` and `check_configs.model_id` were absent afterward as expected.
+- Runtime smoke checks confirmed production site metadata hydration (`Nbility - API Status`) and the admin login page without browser errors. Dashboard and valid group data require the migration and therefore remain production-window checks.
+- Production migration status: not applied. It remains gated on a confirmed Supabase backup/PITR point, pausing the deployed poller and external schedulers, and retaining the previous deployable image.
 
 ## Sync And Ancestry
 
@@ -52,27 +66,27 @@ The 22 patch-equivalent commits include rewritten merge commits. There are 13 up
 
 | Priority | Subsystem | Candidate | Local status | Classification | Recommended action |
 | --- | --- | --- | --- | --- | --- |
-| High | Manual and scheduled stream checks | `4cce8b1` | Not applied | Backport now | Cherry-pick or apply this isolated three-route fix |
+| High | Manual and scheduled stream checks | `4cce8b1` | Equivalent behavior applied through the shared official-based loader | Already covered | Keep single-test and scheduler execution on `loadProviderConfigsFromDB`; the omitted legacy batch route is not present in the target admin |
 | Medium / optional | Global group health, dashboard URL state, settings, and migrations | `97030a2`, `5ba4265`, `8c063e9`, `fc53f64`, `e6f8106`, `8a6d812`, `75a3ec3`, `8d4a63e`, `8b12a08`, `8e83735`, `d3a80e2` | Not applied | Conditional / Manual backport | Backport as one reviewed feature batch only if this deployment integrates fishxcode/New API group-health data |
 | None | Docker publishing/image identity | `39306e4` | Equivalent workflow already covered locally; image identity differs intentionally | Skip | Keep the dynamic GHCR workflow from local `02e96e8`; do not change Compose to `ghcr.io/fishxcode/check-cx` |
-| High | Official v1.21.2-v1.23.11 update | `official/master` (`a194519`) | Inspected; proposal pending approval | Manual backport | Build from official `v1.23.11` and forward-port active deployed local capabilities |
-| High | Deployed Supabase data | Current production project | Read-only inventory complete | Manual backport | Use a custom lossless migration; do not run the official migration chain unchanged |
+| High | Official v1.21.2-v1.23.11 update | `official/master` (`a194519`) | Applied as the integration branch base | Already covered | Keep the official snapshot as the branch base and review only compatibility-layer changes |
+| High | Deployed Supabase data | Current production project | Custom migration implemented and rollback-rehearsed; production not applied | Manual backport | Use the custom lossless migration during the approved rollout window; do not run the official migration chain unchanged |
 
 ### Official v1.23.11 update
 
-The official line is 65 patch-equivalent commits ahead of local `HEAD`. Compared with official `v1.20.11`, the current release changes 128 files with about 20,032 insertions and 5,264 deletions. The main batches are:
+The official line was 65 patch-equivalent commits ahead of the original local `master`. Compared with official `v1.20.11`, the current release changes 128 files with about 20,032 insertions and 5,264 deletions. The integration branch now contains these batches:
 
 | Batch | Representative commits | Status | Classification | Action |
 | --- | --- | --- | --- | --- |
-| Provider/API correctness | `a2ee0c3`, `f5de606`, `5e8add3`, `cc474d4` | Not applied | Backport now | Carry into the target official-based branch |
-| Request templates and model normalization | `5ae6192`, `e88b309`, `c907996` | Not applied | Manual backport | Replace the official destructive sequence with a compatibility migration |
-| Docker poller and availability correctness | `917a9c5`, `19192b1` | Not applied | Backport now | Include and verify standalone startup plus degraded availability behavior |
-| Next.js and AI SDK major upgrades | `5eddbc9`, `52deaff`, `336485e`, `4615983` | Not applied | Manual backport | Integrate as one build/runtime batch; requires Node.js 22+ |
-| Official UI redesign | `efcac47..b9eb3a0` | Not applied | Manual backport | Use official UI as the target, then restore active local metadata/settings behavior |
-| Capability challenge sampling | `19b83b4` | Not applied | Conditional | Add after schema compatibility and polling behavior are stable |
-| Official admin user directory | `16bccbb` | Not applied and not consumed by official application code | Conditional | Create additively; do not make it a deployment gate |
+| Provider/API correctness | `a2ee0c3`, `f5de606`, `5e8add3`, `cc474d4` | Applied from official base | Already covered | Verify real streaming and generate-mode checks after migration |
+| Request templates and model normalization | `5ae6192`, `e88b309`, `c907996` | Applied with compatibility migration | Manual backport | Use the custom additive migration, retaining legacy columns and instance overrides |
+| Docker poller and availability correctness | `917a9c5`, `19192b1` | Applied; build-time duplicate poller startup removed | Manual backport | Verify one standalone leader after migration |
+| Next.js and AI SDK major upgrades | `5eddbc9`, `52deaff`, `336485e`, `4615983` | Applied and build-verified on Node 24 | Already covered | Deploy only on Node.js 22+ |
+| Official UI redesign | `efcac47..b9eb3a0` | Applied with local site/group metadata hydration | Already covered | Capture final screenshots after migrated data renders |
+| Capability challenge sampling | `19b83b4` | Applied in code and additive schema | Conditional | Verify challenge recording in the rollout smoke test |
+| Official admin user directory | `16bccbb` | Added to migration but not used as a login gate | Conditional | Keep current Supabase session login for this release |
 
-Direct merging is not recommended: the repository snapshots differ across 249 files and a simulated merge reports 20 conflicts in core UI, polling, provider, Supabase, type, package, and schema files. The target should be constructed from official `v1.23.11` with selected active local capabilities ported forward.
+Direct merging remains inappropriate: the repository snapshots differ across 249 files and a simulated merge reports 20 conflicts in core UI, polling, provider, Supabase, type, package, and schema files. The target has instead been constructed from official `v1.23.11` with selected active local capabilities ported forward.
 
 ### Deployed database inventory
 
@@ -118,7 +132,7 @@ Required migration shape:
 - `app/api/admin/configs/batch-test/route.ts`
 - `app/api/internal/checks/run/route.ts`
 
-Local storage, normal config loading, and the provider runner already support `stream_mode`, but these manual/internal paths omit it. This means a config set to non-streaming/generate mode can be tested with the wrong mode. `git apply --check` confirms the upstream patch applies cleanly to local `HEAD`.
+The integration uses `loadProviderConfigsFromDB` for the single-test and scheduler-token routes, so both receive the config-level `streamMode`; AI SDK v7 execution calls `generateText` for `generate` mode. The legacy batch-test route is intentionally absent from the smaller target admin surface.
 
 ### Global group-health feature
 
@@ -147,13 +161,9 @@ The cumulative feature patch applies cleanly to local `HEAD` according to `git a
 
 ## Suggested Batches And Verification
 
-1. Backport `4cce8b1` independently, then run `pnpm lint` and `pnpm build`. Manually test one config with `stream_mode=generate` through single test, batch test, and the internal scheduled endpoint.
-2. Do not direct-merge `upstream/master`. The force-rewritten history creates 17 conflicts and obscures the small set of real changes.
-3. If global group health is wanted, backport the 11-commit feature as one reviewed batch while preserving local threshold, ignore, and image choices. Add URL validation, per-window caching/rate limiting, and a deliberate disabled-by-default migration before deployment.
-4. For that optional batch, replay all four migrations against staging, run `pnpm lint` and `pnpm build`, then manually verify admin secret handling, dashboard URL state, every configured time window, failed upstream requests, and public-route load behavior.
-5. Rebase the recommendation around official `v1.23.11`; retain this h7ml analysis only as a source for intentionally selected downstream features.
-6. Do not execute production schema or data writes until the official migration sequence and deployed database inventory have been reconciled and the OpenSpec proposal is approved.
-7. Build the new code from official `v1.23.11`, then port only deployed local capabilities: site settings, scheduler-token checks, group display metadata, configurable threshold/polling/concurrency, config metadata overrides, and `stream_mode`.
-8. Apply an additive compatibility migration in staging first. Verify row counts and config behavior, deploy code, then run production migration during a short polling pause.
+1. Application batch: complete on `upgrade/official-v1.23.11`; keep `official/master` as the base and review the compatibility changes before deployment.
+2. Database batch: apply the additive migration only after backup/PITR confirmation and a polling pause, then run the verification SQL before code deployment.
+3. Runtime batch: deploy on Node.js 22+, verify one poller leader, streaming and generate checks, dashboard/group data, scheduler-token execution, and challenge recording before resuming traffic.
+4. Optional h7ml batch: continue to skip global group health unless explicitly selected; if selected later, add URL validation, per-window caching/rate limiting, and disabled-by-default deployment settings.
 
-The validated OpenSpec proposal is `openspec/changes/update-official-v1-23-11/`. Implementation and production writes remain pending user approval.
+The approved OpenSpec change is `openspec/changes/update-official-v1-23-11/`. Application implementation and rollback rehearsal are complete; production database writes remain gated by rollout prerequisites.

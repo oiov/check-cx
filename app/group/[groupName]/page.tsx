@@ -5,6 +5,7 @@ import {ChevronLeft} from "lucide-react";
 
 import {GroupDashboardBootstrap} from "@/components/group-dashboard-bootstrap";
 import {getAvailableGroups} from "@/lib/core/group-data";
+import {getGroupInfo} from "@/lib/database/group-info";
 
 
 interface GroupPageProps {
@@ -16,9 +17,11 @@ export async function generateMetadata({ params }: GroupPageProps) {
   const { groupName } = await params;
   const decodedGroupName = decodeURIComponent(groupName);
 
+  const info = await getGroupInfo(decodedGroupName);
+  const title = info?.display_name || decodedGroupName;
   return {
-    title: `${decodedGroupName} - 模型健康面板`,
-    description: `查看 ${decodedGroupName} 分组下的模型健康状态`,
+    title,
+    description: info?.description || `查看 ${decodedGroupName} 分组下的模型健康状态`,
   };
 }
 

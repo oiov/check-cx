@@ -23,11 +23,16 @@ export interface CheckConfigRow {
   name: string;
   type: string;
   model_id: string;
+  model?: string;
+  template_id?: string | null;
   endpoint: string;
   api_key: string;
   enabled: boolean;
   is_maintenance: boolean;
   group_name?: string | null;
+  request_header?: Record<string, string> | null;
+  metadata?: Record<string, unknown> | null;
+  stream_mode?: "stream" | "generate" | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -90,7 +95,10 @@ export interface AvailabilityStats {
 export interface GroupInfoRow {
   id: string;
   group_name: string;
+  display_name?: string | null;
+  description?: string | null;
   website_url?: string | null;
+  icon_url?: string | null;
   tags?: string | null;
   created_at?: string;
   updated_at?: string;

@@ -51,11 +51,16 @@ CREATE TABLE dev.check_configs (
     name text NOT NULL,
     type dev.provider_type NOT NULL,
     model_id uuid NOT NULL,
+    model text,
+    template_id uuid,
     endpoint text NOT NULL,
     api_key text NOT NULL,
     enabled boolean DEFAULT true,
     is_maintenance boolean DEFAULT false,
     group_name text,
+    request_header jsonb,
+    metadata jsonb,
+    stream_mode text NOT NULL DEFAULT 'stream',
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
     CONSTRAINT check_configs_pkey PRIMARY KEY (id),
@@ -99,7 +104,10 @@ COMMENT ON TABLE dev.check_challenges IS '模型能力评估挑战记录（难�
 CREATE TABLE dev.group_info (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     group_name text NOT NULL,
+    display_name text,
+    description text,
     website_url text,
+    icon_url text,
     tags text DEFAULT ''::text NOT NULL,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
@@ -135,6 +143,34 @@ CREATE TABLE dev.system_notifications (
     is_active boolean DEFAULT true,
     level text DEFAULT 'info',
     created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE dev.site_settings (
+    key text PRIMARY KEY,
+    value text,
+    description text,
+    editable boolean NOT NULL DEFAULT true,
+    value_type text NOT NULL DEFAULT 'string'
+);
+
+INSERT INTO dev.site_settings (key, value, description, editable, value_type) VALUES
+    ('check_poll_interval_seconds', '60', '轮询间隔（秒）', true, 'number'),
+    ('degraded_threshold_ms', '6000', '延迟超过此值判定为降级（毫秒）', true, 'number'),
+    ('max_concurrency', '5', '并发检测任务上限（1-20）', true, 'number'),
+    ('history_retention_count', '60', '每个配置最多保留历史条数', true, 'number')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE dev.scheduler_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    token_hash text NOT NULL UNIQUE,
+    token_prefix text NOT NULL,
+    scope text NOT NULL DEFAULT 'checks:run',
+    enabled boolean NOT NULL DEFAULT true,
+    last_used_at timestamptz,
+    expires_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- 轮询主节点租约表（单行租约）

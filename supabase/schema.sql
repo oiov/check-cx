@@ -59,11 +59,16 @@ CREATE TABLE public.check_configs (
     name            text NOT NULL,
     type            public.provider_type NOT NULL,
     model_id        uuid NOT NULL REFERENCES public.check_models(id) ON DELETE RESTRICT,
+    model           text,
+    template_id     uuid REFERENCES public.check_request_templates(id) ON DELETE SET NULL,
     endpoint        text NOT NULL,
     api_key         text NOT NULL,
     enabled         boolean DEFAULT true,
     is_maintenance  boolean DEFAULT false,
     group_name      text,
+    request_header  jsonb,
+    metadata        jsonb,
+    stream_mode     text NOT NULL DEFAULT 'stream' CHECK (stream_mode IN ('stream', 'generate')),
     created_at      timestamptz DEFAULT now(),
     updated_at      timestamptz DEFAULT now()
 );
@@ -136,7 +141,10 @@ COMMENT ON COLUMN public.check_challenges.checked_at IS '检测时间';
 CREATE TABLE public.group_info (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     group_name  text NOT NULL UNIQUE,
+    display_name text,
+    description text,
     website_url text,
+    icon_url    text,
     tags        text NOT NULL DEFAULT '',
     created_at  timestamptz DEFAULT now(),
     updated_at  timestamptz DEFAULT now()
@@ -194,6 +202,41 @@ COMMENT ON COLUMN public.system_notifications.message IS '通知内容，支持 
 COMMENT ON COLUMN public.system_notifications.is_active IS '是否激活，true 为显示';
 COMMENT ON COLUMN public.system_notifications.level IS '通知级别：info, warning, error';
 COMMENT ON COLUMN public.system_notifications.created_at IS '创建时间';
+
+-- 运行时站点设置，保留本地部署的动态轮询与站点元数据能力
+CREATE TABLE public.site_settings (
+    key         text PRIMARY KEY,
+    value       text,
+    description text,
+    editable    boolean NOT NULL DEFAULT true,
+    value_type  text NOT NULL DEFAULT 'string'
+);
+
+INSERT INTO public.site_settings (key, value, description, editable, value_type) VALUES
+    ('check_poll_interval_seconds', '60', '轮询间隔（秒）', true, 'number'),
+    ('degraded_threshold_ms', '6000', '延迟超过此值判定为降级（毫秒）', true, 'number'),
+    ('max_concurrency', '5', '并发检测任务上限（1-20）', true, 'number'),
+    ('history_retention_count', '60', '每个配置最多保留历史条数', true, 'number'),
+    ('site.title', 'Check CX - AI 模型健康监控', '站点标题', true, 'string'),
+    ('site.description', '实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟', '站点描述', true, 'string'),
+    ('site.logo_url', '/favicon.png', 'Logo 图片 URL', true, 'string'),
+    ('site.favicon_url', '/favicon.png', 'Favicon URL', true, 'string')
+ON CONFLICT (key) DO NOTHING;
+
+CREATE TABLE public.scheduler_tokens (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name          text NOT NULL,
+    token_hash    text NOT NULL UNIQUE,
+    token_prefix  text NOT NULL,
+    scope         text NOT NULL DEFAULT 'checks:run',
+    enabled       boolean NOT NULL DEFAULT true,
+    last_used_at  timestamptz,
+    expires_at    timestamptz,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_scheduler_tokens_enabled ON public.scheduler_tokens (enabled, created_at DESC);
 
 -- 轮询主节点租约表（单行租约）
 CREATE TABLE public.check_poller_leases (
