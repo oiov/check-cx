@@ -7,10 +7,8 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
-  ArrowLeft,
   ChevronDown,
   ExternalLink,
-  Github,
   GripVertical,
   RefreshCcw,
   Search,
@@ -696,34 +694,20 @@ export function DashboardView({ initialData }: DashboardViewProps) {
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           <div className="flex w-full items-center gap-3 sm:w-auto">
             <Image
-              src="/favicon.png"
-              alt="Check CX"
+              src="https://nbility.ai/logo.svg"
+              alt="Nbility"
               width={32}
               height={32}
               priority
               className="h-8 w-8 shrink-0 rounded-lg object-contain"
             />
-            <h1 className="text-xl font-semibold tracking-tight">Check CX</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Nbility Status</h1>
             <span className="hidden text-sm text-muted-foreground sm:inline">
               AI 模型接口健康监控
             </span>
-            <Link
-              href="https://linux.do"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground sm:ml-0"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Linux.do
-            </Link>
-            <Link
-              href="https://github.com/BingZi-233/check-cx"
-              target="_blank"
-              className="text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Github className="h-4 w-4" />
-            </Link>
-            <ThemeToggle />
+            <div className="ml-auto sm:ml-0">
+              <ThemeToggle />
+            </div>
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2 sm:w-auto">

@@ -13,7 +13,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <div className="min-h-screen bg-muted/20">
       <header className="border-b bg-background">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <Link href="/admin" className="font-semibold">Check CX 管理</Link>
+          <Link href="/admin" className="font-semibold">Nbility Status 管理</Link>
           <nav className="flex flex-wrap items-center gap-1">
             {links.map(([label, href]) => (
               <Link key={href} href={href} className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">

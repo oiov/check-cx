@@ -157,7 +157,14 @@ INSERT INTO dev.site_settings (key, value, description, editable, value_type) VA
     ('check_poll_interval_seconds', '60', '轮询间隔（秒）', true, 'number'),
     ('degraded_threshold_ms', '6000', '延迟超过此值判定为降级（毫秒）', true, 'number'),
     ('max_concurrency', '5', '并发检测任务上限（1-20）', true, 'number'),
-    ('history_retention_count', '60', '每个配置最多保留历史条数', true, 'number')
+    ('history_retention_count', '60', '每个配置最多保留历史条数', true, 'number'),
+    ('site.title', 'Nbility Status', '站点标题', true, 'string'),
+    ('site.description', 'Nbility AI 模型服务状态与可用性监控', '站点描述', true, 'string'),
+    ('site.url', 'https://status.nbility.ai', '站点地址', true, 'string'),
+    ('site.keywords', 'Nbility, Nbility Status, AI API Status, AI Model Status', '站点关键词', true, 'string'),
+    ('site.logo_url', 'https://nbility.ai/logo.svg', 'Logo 图片 URL', true, 'string'),
+    ('site.favicon_url', 'https://nbility.ai/logo.svg', 'Favicon URL', true, 'string'),
+    ('site.github_url', '', 'GitHub 地址（留空表示不显示）', true, 'string')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE dev.scheduler_tokens (

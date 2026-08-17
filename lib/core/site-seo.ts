@@ -3,9 +3,11 @@ import { connection } from "next/server";
 
 import { getSiteSettingSync, refreshSiteSettings } from "./site-settings";
 
-const DEFAULT_TITLE = "Check CX - AI 模型健康监控";
-const DEFAULT_DESCRIPTION = "实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟";
-const DEFAULT_KEYWORDS = ["AI 状态监控", "OpenAI 状态", "Gemini 状态", "Anthropic 状态", "API uptime"];
+const DEFAULT_TITLE = "Nbility Status";
+const DEFAULT_DESCRIPTION = "Nbility AI 模型服务状态与可用性监控";
+const DEFAULT_KEYWORDS = ["Nbility", "Nbility Status", "AI API Status", "AI Model Status"];
+const DEFAULT_SITE_URL = "https://status.nbility.ai";
+const DEFAULT_LOGO_URL = "https://nbility.ai/logo.svg";
 
 function normalizeSiteUrl(value: string): string | null {
   if (!value.trim()) return null;
@@ -31,7 +33,6 @@ export interface SiteSeoConfig {
   keywords: string[];
   faviconUrl: string;
   logoUrl: string;
-  githubUrl: string;
   siteUrl: string | null;
 }
 
@@ -43,10 +44,9 @@ export async function getSiteSeoConfig(): Promise<SiteSeoConfig> {
     title: getSiteSettingSync("site.title", DEFAULT_TITLE),
     description: getSiteSettingSync("site.description", DEFAULT_DESCRIPTION),
     keywords: keywords(getSiteSettingSync("site.keywords", DEFAULT_KEYWORDS.join(", "))),
-    faviconUrl: getSiteSettingSync("site.favicon_url", "/favicon.png"),
-    logoUrl: getSiteSettingSync("site.logo_url", "/favicon.png"),
-    githubUrl: getSiteSettingSync("site.github_url", ""),
-    siteUrl: normalizeSiteUrl(getSiteSettingSync("site.url", "")) ?? normalizeSiteUrl(envUrl),
+    faviconUrl: getSiteSettingSync("site.favicon_url", DEFAULT_LOGO_URL),
+    logoUrl: getSiteSettingSync("site.logo_url", DEFAULT_LOGO_URL),
+    siteUrl: normalizeSiteUrl(getSiteSettingSync("site.url", DEFAULT_SITE_URL)) ?? normalizeSiteUrl(envUrl),
   };
 }
 

@@ -7,14 +7,41 @@ import {NotificationBanner} from "@/components/notification-banner";
 import {SiteConfigHydrator} from "@/components/site-config-hydrator";
 const jetbrainsMono = JetBrains_Mono({subsets:['latin'],variable:'--font-mono'});
 
-const DEFAULT_TITLE = "Check CX - AI 模型健康监控";
-const DEFAULT_DESCRIPTION = "实时检测 OpenAI / Gemini / Anthropic 对话接口的可用性与延迟";
+const DEFAULT_TITLE = "Nbility Status";
+const DEFAULT_DESCRIPTION = "Nbility AI 模型服务状态与可用性监控";
+const DEFAULT_KEYWORDS = ["Nbility", "Nbility Status", "AI API Status", "AI Model Status"];
+const SITE_URL = "https://status.nbility.ai";
+const BRAND_URL = "https://nbility.ai";
+const LOGO_URL = `${BRAND_URL}/logo.svg`;
 
 export const metadata: Metadata = {
-  title: DEFAULT_TITLE,
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: DEFAULT_TITLE,
+    template: `%s | ${DEFAULT_TITLE}`,
+  },
   description: DEFAULT_DESCRIPTION,
-  icons: { icon: "/favicon.png" },
-  openGraph: { title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION },
+  applicationName: DEFAULT_TITLE,
+  keywords: DEFAULT_KEYWORDS,
+  authors: [{ name: "Nbility", url: BRAND_URL }],
+  creator: "Nbility",
+  publisher: "Nbility",
+  alternates: { canonical: "/" },
+  icons: { icon: LOGO_URL, shortcut: LOGO_URL, apple: LOGO_URL },
+  openGraph: {
+    type: "website",
+    url: SITE_URL,
+    siteName: DEFAULT_TITLE,
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    images: [{ url: LOGO_URL, width: 1024, height: 1024, alt: "Nbility" }],
+  },
+  twitter: {
+    card: "summary",
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    images: [LOGO_URL],
+  },
 };
 
 const themeBootScript = `(()=>{
