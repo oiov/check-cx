@@ -12,3 +12,5 @@ Before production:
 6. Resume polling only after the smoke checks pass. Keep the previous image and all legacy columns for the rollback window.
 
 The migration has already been executed against a real database connection in a transaction and rolled back successfully; no production rows were changed by that rehearsal. Do not run destructive cleanup of legacy columns as part of this release.
+
+Production migration status (2026-08-17): committed successfully. Verification recorded 44 configs, 7,912 history rows, 10 groups, 12 site settings, and 3 scheduler tokens. All configs have a model relationship; model type mismatches, orphan history rows, and unresolved config payloads are zero. PostgREST resolves the new relationships and reports 28 models plus 1 compatibility template.

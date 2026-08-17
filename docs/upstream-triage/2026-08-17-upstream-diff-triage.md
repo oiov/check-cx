@@ -30,7 +30,7 @@
 - `pnpm install --frozen-lockfile`, TypeScript, lint, `git diff --check`, and `pnpm build` pass. Lint retains one pre-existing warning in ignored local `triggers/worker.js`.
 - The production database migration was rehearsed in one transaction and rolled back. Post-rollback state remained 44 configs, 7,908 history rows, 10 groups, 12 site settings, and 3 scheduler tokens; `check_models` and `check_configs.model_id` were absent afterward as expected.
 - Runtime smoke checks confirmed production site metadata hydration (`Nbility - API Status`) and the admin login page without browser errors. Dashboard and valid group data require the migration and therefore remain production-window checks.
-- Production migration status: not applied. It remains gated on a confirmed Supabase backup/PITR point, pausing the deployed poller and external schedulers, and retaining the previous deployable image.
+- Production migration status: committed on 2026-08-17. Verification recorded 44 configs, 7,912 history rows, 10 groups, 12 site settings, 3 scheduler tokens, 28 models, and 1 compatibility template. Model type mismatches, orphan history rows, and unresolved payloads were all zero; PostgREST resolved the new relationships.
 
 ## Sync And Ancestry
 
@@ -70,7 +70,7 @@ The 22 patch-equivalent commits include rewritten merge commits. There are 13 up
 | Medium / optional | Global group health, dashboard URL state, settings, and migrations | `97030a2`, `5ba4265`, `8c063e9`, `fc53f64`, `e6f8106`, `8a6d812`, `75a3ec3`, `8d4a63e`, `8b12a08`, `8e83735`, `d3a80e2` | Not applied | Conditional / Manual backport | Backport as one reviewed feature batch only if this deployment integrates fishxcode/New API group-health data |
 | None | Docker publishing/image identity | `39306e4` | Equivalent workflow already covered locally; image identity differs intentionally | Skip | Keep the dynamic GHCR workflow from local `02e96e8`; do not change Compose to `ghcr.io/fishxcode/check-cx` |
 | High | Official v1.21.2-v1.23.11 update | `official/master` (`a194519`) | Applied as the integration branch base | Already covered | Keep the official snapshot as the branch base and review only compatibility-layer changes |
-| High | Deployed Supabase data | Current production project | Custom migration implemented and rollback-rehearsed; production not applied | Manual backport | Use the custom lossless migration during the approved rollout window; do not run the official migration chain unchanged |
+| High | Deployed Supabase data | Current production project | Custom migration committed and verified in production | Applied | Keep legacy columns through the rollback window; do not run the official migration chain or destructive cleanup |
 
 ### Official v1.23.11 update
 
@@ -166,4 +166,4 @@ The cumulative feature patch applies cleanly to local `HEAD` according to `git a
 3. Runtime batch: deploy on Node.js 22+, verify one poller leader, streaming and generate checks, dashboard/group data, scheduler-token execution, and challenge recording before resuming traffic.
 4. Optional h7ml batch: continue to skip global group health unless explicitly selected; if selected later, add URL validation, per-window caching/rate limiting, and disabled-by-default deployment settings.
 
-The approved OpenSpec change is `openspec/changes/update-official-v1-23-11/`. Application implementation and rollback rehearsal are complete; production database writes remain gated by rollout prerequisites.
+The approved OpenSpec change is `openspec/changes/update-official-v1-23-11/`. Application implementation and production migration are complete; deployment smoke checks and rollback-window retention remain.

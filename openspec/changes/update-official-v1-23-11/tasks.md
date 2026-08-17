@@ -39,7 +39,7 @@
 
 - [ ] 5.1 Confirm a restorable Supabase backup or point-in-time recovery checkpoint.
 - [ ] 5.2 Pause application polling and external scheduler calls.
-- [ ] 5.3 Run preflight SQL and record verification counts.
-- [ ] 5.4 Execute the additive production migration in one short transaction.
+- [x] 5.3 Run preflight SQL and record verification counts.
+- [x] 5.4 Execute the additive production migration in one short transaction.
 - [ ] 5.5 Deploy the updated application and run smoke checks before resuming polling.
 - [ ] 5.6 Keep legacy columns for at least one verified rollback window; perform destructive cleanup only as a separate approved change.
